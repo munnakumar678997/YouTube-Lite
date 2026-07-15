@@ -22,6 +22,7 @@ public class YTProWebViewClient extends WebViewClient {
     public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
         String url = request.getUrl().toString().toLowerCase();
 
+        // Only block clearly ad-related URLs that won't affect video playback
         if (isAdUrl(url)) {
             Log.d(TAG, "Blocked ad URL: " + url);
             return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream("".getBytes()));
@@ -31,17 +32,30 @@ public class YTProWebViewClient extends WebViewClient {
     }
 
     private boolean isAdUrl(String url) {
-        return url.contains("googleads") ||
-                url.contains("doubleclick.net") ||
+        // Don't block if it's a video stream or player-related URL
+        if (url.contains("googlevideo.com") ||
+            url.contains("videoplayback") ||
+            url.contains("/player") ||
+            url.contains("youtubei/v1/player") ||
+            url.contains("youtubei/v1/next") ||
+            url.contains("youtubei/v1/browse") ||
+            url.contains("youtubei/v1/search") ||
+            url.contains("/watch") ||
+            url.contains("yt3.ggpht.com") ||
+            url.contains("i.ytimg.com") ||
+            url.contains("youtube.com/s/") ||
+            url.contains("youtube.com/youtubei")) {
+            return false;
+        }
+
+        return url.contains("doubleclick.net") ||
                 url.contains("googlesyndication.com") ||
                 url.contains("googleadservices.com") ||
                 url.contains("adservice.google.com") ||
-                url.contains("pagead") ||
                 url.contains("ad.youtube.com") ||
                 url.contains("youtube.com/api/ads") ||
                 url.contains("youtube.com/pagead") ||
                 url.contains("youtube.com/get_midroll") ||
-                url.contains("ad_break") ||
                 url.contains("adsystem.com") ||
                 url.contains("admob.com") ||
                 url.contains("ads.google.com") ||
@@ -52,10 +66,7 @@ public class YTProWebViewClient extends WebViewClient {
                 url.contains("static.doubleclick.net") ||
                 url.contains("s0.2mdn.net") ||
                 url.contains("survey.g.doubleclick.net") ||
-                url.contains("google.com/adsense") ||
-                url.contains("/ad_") ||
-                url.contains("/ads/") ||
-                url.contains("generate_204");
+                url.contains("google.com/adsense");
     }
 
     @Override
@@ -63,6 +74,52 @@ public class YTProWebViewClient extends WebViewClient {
         super.onPageFinished(view, url);
         view.evaluateJavascript(getAdBlockScript(), null);
         view.evaluateJavascript(getBackgroundPlaybackScript(), null);
+        view.evaluateJavascript(getFastPlaybackScript(), null);
+    }
+
+    private String getFastPlaybackScript() {
+        return "(" + "function() {" +
+            "if (window._ytlFastPlaySetup) return;" +
+            "window._ytlFastPlaySetup = true;" +
+
+            // Force video to play as soon as it has enough data
+            "function forcePlay() {" +
+            "  var v = document.querySelector('video');" +
+            "  if (!v) return;" +
+            "  if (v.readyState >= 2 && v.paused && !window._ytlUserPaused) {" +
+            "    v.play().catch(function(){});" +
+            "  }" +
+            "}" +
+
+            // Watch for new video elements and force play
+            "function watchVideo() {" +
+            "  var v = document.querySelector('video');" +
+            "  if (!v) { setTimeout(watchVideo, 500); return; }" +
+            "  v.addEventListener('loadeddata', function() {" +
+            "    if (!window._ytlUserPaused) { v.play().catch(function(){}); }" +
+            "  });" +
+            "  v.addEventListener('canplay', function() {" +
+            "    if (!window._ytlUserPaused) { v.play().catch(function(){}); }" +
+            "  });" +
+            "  v.addEventListener('waiting', function() {" +
+            "    setTimeout(forcePlay, 200);" +
+            "  });" +
+            "}" +
+            "watchVideo();" +
+
+            // Periodically check if video is stuck and force play
+            "setInterval(function() {" +
+            "  var v = document.querySelector('video');" +
+            "  if (v && v.paused && !v.ended && !window._ytlUserPaused && v.readyState >= 2) {" +
+            "    v.play().catch(function(){});" +
+            "  }" +
+            "}, 1000);" +
+
+            // Re-watch on SPA navigation
+            "var titleObs = new MutationObserver(function() { setTimeout(watchVideo, 500); });" +
+            "var titleEl = document.querySelector('title') || document.head;" +
+            "titleObs.observe(titleEl, {childList: true, subtree: true});" +
+            "})();";
     }
 
     private String getAdBlockScript() {
@@ -140,50 +197,17 @@ public class YTProWebViewClient extends WebViewClient {
             "removeExistingAds();" +
             "setInterval(removeExistingAds, 2000);" +
 
-            // Intercept fetch to strip ad data from API responses
-            "var origFetch = window.fetch;" +
-            "window.fetch = function() {" +
-            "  var u = (arguments[0] && arguments[0].url) ? arguments[0].url : String(arguments[0]);" +
-            "  if (u.indexOf('googleads') > -1 || u.indexOf('doubleclick') > -1 || u.indexOf('pagead') > -1 || u.indexOf('/api/ads') > -1 || u.indexOf('googlesyndication') > -1 || u.indexOf('imasdk') > -1) {" +
-            "    return Promise.resolve(new Response('', {status: 200}));" +
-            "  }" +
-            "  return origFetch.apply(this, arguments).then(function(resp) {" +
-            "    if (u.indexOf('youtubei/v1') > -1) {" +
-            "      return resp.clone().text().then(function(t) {" +
-            "        try {" +
-            "          var j = JSON.parse(t);" +
-            "          delete j.adSlots; delete j.playerAds; delete j.adPlacements; delete j.adBreakHeartbeatParams;" +
-            "          if (j.playerResponse) { delete j.playerResponse.adPlacements; delete j.playerResponse.playerAds; delete j.playerResponse.adSlots; }" +
-            "          return new Response(JSON.stringify(j), {status: resp.status, headers: resp.headers});" +
-            "        } catch(e) { return resp; }" +
-            "      });" +
-            "    }" +
-            "    return resp;" +
-            "  });" +
-            "};" +
-
-            // Intercept XHR
-            "var origOpen = XMLHttpRequest.prototype.open;" +
-            "XMLHttpRequest.prototype.open = function(m, u) {" +
-            "  this._url = u;" +
-            "  if (u.indexOf('googleads') > -1 || u.indexOf('doubleclick') > -1 || u.indexOf('pagead') > -1 || u.indexOf('/api/ads') > -1 || u.indexOf('googlesyndication') > -1) {" +
-            "    this._blocked = true;" +
-            "  }" +
-            "  return origOpen.apply(this, arguments);" +
-            "};" +
-            "var origSend = XMLHttpRequest.prototype.send;" +
-            "XMLHttpRequest.prototype.send = function() {" +
-            "  if (this._blocked) return;" +
-            "  return origSend.apply(this, arguments);" +
-            "};" +
-
-            // Skip video ads
+            // Skip video ads immediately - faster interval
             "setInterval(function() {" +
             "  var v = document.querySelector('video');" +
-            "  var skip = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, [class*=\"skip-button\"]');" +
+            "  var adShowing = document.querySelector('.ad-showing, .ytp-ad-player-overlay');" +
+            "  if (adShowing && v) {" +
+            "    v.currentTime = v.duration || 9999;" +
+            "    v.playbackRate = 16;" +
+            "  }" +
+            "  var skip = document.querySelector('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, [class*=\"skip-button\"], button[id*=\"skip\"]');" +
             "  if (skip) { skip.click(); }" +
-            "  if (v && document.querySelector('.ad-showing')) { v.currentTime = v.duration || 0; }" +
-            "}, 500);" +
+            "}, 100);" +
             "})();";
     }
 
