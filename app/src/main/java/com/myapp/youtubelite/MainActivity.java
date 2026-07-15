@@ -13,6 +13,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.IntentFilter;
 import android.os.Build;
+import android.util.Log;
 import com.myapp.youtubelite.webview.YTProWebView;
 import com.myapp.youtubelite.webview.YTProWebViewClient;
 import com.myapp.youtubelite.webview.YTProWebChromeClient;
@@ -22,6 +23,7 @@ public class MainActivity extends Activity {
 
     private YTProWebView webView;
     private BroadcastReceiver playbackActionReceiver;
+    private static final String TAG = "MainActivity";
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface", "UnspecifiedRegisterReceiverFlag"})
     @Override
@@ -54,12 +56,66 @@ public class MainActivity extends Activity {
             public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
                 if (action != null && webView != null) {
+                    Log.d(TAG, "Received broadcast action: " + action);
                     switch (action) {
                         case ForegroundService.ACTION_PLAY_WEBVIEW:
-                            webView.evaluateJavascript("document.querySelector('video').play();", null);
+                            webView.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    webView.evaluateJavascript(
+                                        "(function() {" +
+                                        "  var v = document.querySelector('video');" +
+                                        "  if (v) { v.play(); }" +
+                                        "})();", null);
+                                }
+                            });
                             break;
                         case ForegroundService.ACTION_PAUSE_WEBVIEW:
-                            webView.evaluateJavascript("document.querySelector('video').pause();", null);
+                            webView.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    webView.evaluateJavascript(
+                                        "(function() {" +
+                                        "  var v = document.querySelector('video');" +
+                                        "  if (v) {" +
+                                        "    window._ytlUserPaused = true;" +
+                                        "    v.pause();" +
+                                        "  }" +
+                                        "})();", null);
+                                }
+                            });
+                            break;
+                        case ForegroundService.ACTION_NEXT_WEBVIEW:
+                            webView.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    webView.evaluateJavascript(
+                                        "(function() {" +
+                                        "  var next = document.querySelector('.ytp-next-button, .ytm-autonav-bar a, a.ytm-next-button, [class*=\"next-button\"], .next-button');" +
+                                        "  if (next) { next.click(); return; }" +
+                                        "  var related = document.querySelector('ytm-compact-video-renderer a, ytd-compact-video-renderer a');" +
+                                        "  if (related) { related.click(); }" +
+                                        "})();", null);
+                                }
+                            });
+                            break;
+                        case ForegroundService.ACTION_PREVIOUS_WEBVIEW:
+                            webView.post(new Runnable() {
+                                @Override
+                                public void run() {
+                                    webView.evaluateJavascript(
+                                        "(function() {" +
+                                        "  var v = document.querySelector('video');" +
+                                        "  if (v) {" +
+                                        "    if (v.currentTime > 5) {" +
+                                        "      v.currentTime = 0;" +
+                                        "    } else {" +
+                                        "      window.history.back();" +
+                                        "    }" +
+                                        "  }" +
+                                        "})();", null);
+                                }
+                            });
                             break;
                     }
                 }
@@ -68,8 +124,10 @@ public class MainActivity extends Activity {
         IntentFilter filter = new IntentFilter();
         filter.addAction(ForegroundService.ACTION_PLAY_WEBVIEW);
         filter.addAction(ForegroundService.ACTION_PAUSE_WEBVIEW);
+        filter.addAction(ForegroundService.ACTION_NEXT_WEBVIEW);
+        filter.addAction(ForegroundService.ACTION_PREVIOUS_WEBVIEW);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(playbackActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+            registerReceiver(playbackActionReceiver, filter, Context.RECEIVER_EXPORTED);
         } else {
             registerReceiver(playbackActionReceiver, filter);
         }

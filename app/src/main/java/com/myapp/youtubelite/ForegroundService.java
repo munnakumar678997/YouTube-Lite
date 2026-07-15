@@ -22,6 +22,8 @@ public class ForegroundService extends Service {
     public static final String ACTION_START_FOREGROUND_SERVICE = "com.myapp.youtubelite.ACTION_START_FOREGROUND_SERVICE";
     public static final String ACTION_PLAY_WEBVIEW = "com.myapp.youtubelite.ACTION_PLAY_WEBVIEW";
     public static final String ACTION_PAUSE_WEBVIEW = "com.myapp.youtubelite.ACTION_PAUSE_WEBVIEW";
+    public static final String ACTION_NEXT_WEBVIEW = "com.myapp.youtubelite.ACTION_NEXT_WEBVIEW";
+    public static final String ACTION_PREVIOUS_WEBVIEW = "com.myapp.youtubelite.ACTION_PREVIOUS_WEBVIEW";
     private MediaSession mediaSession;
     private PlaybackState playbackState;
     private NotificationManager notificationManager;
@@ -44,7 +46,7 @@ public class ForegroundService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         try {
-            startForeground(1, buildNotification(false));
+            startForeground(1, buildNotification(true));
         } catch (Exception e) {
             Log.e("ForegroundService", "Failed to start foreground", e);
             stopSelf();
@@ -106,23 +108,27 @@ public class ForegroundService extends Service {
         mediaSession.setCallback(new MediaSession.Callback() {
             @Override
             public void onPlay() {
+                Log.d("ForegroundService", "MediaSession onPlay");
                 updatePlaybackState(PlaybackState.STATE_PLAYING);
                 updateNotification(true);
                 sendActionToMainActivity(ACTION_PLAY_WEBVIEW);
             }
             @Override
             public void onPause() {
+                Log.d("ForegroundService", "MediaSession onPause");
                 updatePlaybackState(PlaybackState.STATE_PAUSED);
                 updateNotification(false);
                 sendActionToMainActivity(ACTION_PAUSE_WEBVIEW);
             }
             @Override
             public void onSkipToNext() {
-                Log.d("ForegroundService", "onSkipToNext");
+                Log.d("ForegroundService", "MediaSession onSkipToNext");
+                sendActionToMainActivity(ACTION_NEXT_WEBVIEW);
             }
             @Override
             public void onSkipToPrevious() {
-                Log.d("ForegroundService", "onSkipToPrevious");
+                Log.d("ForegroundService", "MediaSession onSkipToPrevious");
+                sendActionToMainActivity(ACTION_PREVIOUS_WEBVIEW);
             }
         });
         mediaSession.setActive(true);
@@ -132,6 +138,7 @@ public class ForegroundService extends Service {
     private void updatePlaybackState(int state) {
         playbackState = new PlaybackState.Builder()
                 .setActions(PlaybackState.ACTION_PLAY | PlaybackState.ACTION_PAUSE |
+                        PlaybackState.ACTION_PLAY_PAUSE |
                         PlaybackState.ACTION_SKIP_TO_NEXT | PlaybackState.ACTION_SKIP_TO_PREVIOUS)
                 .setState(state, 0, 1.0f)
                 .build();
@@ -164,24 +171,24 @@ public class ForegroundService extends Service {
 
         // Add actions
         builder.addAction(makeAction(android.R.drawable.ic_media_previous, "Previous",
-                NotificationActionReceiver.ACTION_PREVIOUS));
+                NotificationActionReceiver.ACTION_PREVIOUS, 1));
         if (isPlaying) {
             builder.addAction(makeAction(android.R.drawable.ic_media_pause, "Pause",
-                    NotificationActionReceiver.ACTION_PLAY_PAUSE));
+                    NotificationActionReceiver.ACTION_PLAY_PAUSE, 2));
         } else {
             builder.addAction(makeAction(android.R.drawable.ic_media_play, "Play",
-                    NotificationActionReceiver.ACTION_PLAY_PAUSE));
+                    NotificationActionReceiver.ACTION_PLAY_PAUSE, 2));
         }
         builder.addAction(makeAction(android.R.drawable.ic_media_next, "Next",
-                NotificationActionReceiver.ACTION_NEXT));
+                NotificationActionReceiver.ACTION_NEXT, 3));
 
         return builder.build();
     }
 
-    private Notification.Action makeAction(int icon, String title, String intentAction) {
+    private Notification.Action makeAction(int icon, String title, String intentAction, int requestCode) {
         Intent intent = new Intent(this, NotificationActionReceiver.class);
         intent.setAction(intentAction);
-        PendingIntent pi = PendingIntent.getBroadcast(this, 0, intent,
+        PendingIntent pi = PendingIntent.getBroadcast(this, requestCode, intent,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Action.Builder(icon, title, pi).build();
     }
@@ -195,6 +202,7 @@ public class ForegroundService extends Service {
     private void handleIntent(Intent intent) {
         String action = intent.getAction();
         if (action == null) return;
+        Log.d("ForegroundService", "handleIntent action: " + action);
         switch (action) {
             case NotificationActionReceiver.ACTION_PLAY_PAUSE:
                 if (playbackState != null && playbackState.getState() == PlaybackState.STATE_PLAYING) {
@@ -219,6 +227,7 @@ public class ForegroundService extends Service {
 
     private void sendActionToMainActivity(String action) {
         Intent intent = new Intent(action);
+        intent.setPackage(getPackageName());
         sendBroadcast(intent);
     }
 }

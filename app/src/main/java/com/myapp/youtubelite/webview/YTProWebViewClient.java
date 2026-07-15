@@ -194,11 +194,17 @@ public class YTProWebViewClient extends WebViewClient {
             "Object.defineProperty(document, 'visibilityState', {get: function() { return 'visible'; }});" +
             "document.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);" +
 
-            // Prevent video pause on visibility change
+            // Flag to track user-initiated pause from notification
+            "window._ytlUserPaused = false;" +
+
+            // Override pause to prevent YouTube from auto-pausing, but allow user-initiated pause
             "var origPause = HTMLVideoElement.prototype.pause;" +
             "HTMLVideoElement.prototype.pause = function() {" +
-            "  if (document.hidden === false) { return; }" +
-            "  return origPause.apply(this, arguments);" +
+            "  if (window._ytlUserPaused) {" +
+            "    window._ytlUserPaused = false;" +
+            "    return origPause.apply(this, arguments);" +
+            "  }" +
+            "  return undefined;" +
             "};" +
 
             // Auto-play next video when current ends
@@ -213,11 +219,6 @@ public class YTProWebViewClient extends WebViewClient {
             "    else {" +
             "      var related = document.querySelector('ytm-compact-video-renderer a, ytd-compact-video-renderer a');" +
             "      if (related) related.click();" +
-            "    }" +
-            "  });" +
-            "  v.addEventListener('pause', function() {" +
-            "    if (!v.ended && !document.querySelector('.ad-showing')) {" +
-            "      setTimeout(function() { v.play(); }, 100);" +
             "    }" +
             "  });" +
             "}" +
