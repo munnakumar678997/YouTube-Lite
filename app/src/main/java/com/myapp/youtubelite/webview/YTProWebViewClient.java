@@ -30,7 +30,7 @@ public class YTProWebViewClient extends WebViewClient {
 
         // CSP stripping (simplified - a full implementation would modify headers)
         // This is a placeholder for more complex CSP manipulation if needed.
-        // For now, we'll focus on blocking ad requests.
+        // For now, we\'ll focus on blocking ad requests.
 
         return super.shouldInterceptRequest(view, request);
     }
@@ -47,17 +47,53 @@ public class YTProWebViewClient extends WebViewClient {
                 url.contains("ad.youtube.com") ||
                 url.contains("doubleclick.net") ||
                 url.contains("googleadservices.com") ||
-                url.contains("ad.googlesyndication.com");
+                url.contains("ad.googlesyndication.com") ||
+                url.contains("policybazaar.com") ||
+                url.contains("insurancedekho.com");
     }
 
     // Method to inject JavaScript after page load (for ad object stripping and MediaSession polyfill)
     @Override
     public void onPageFinished(WebView view, String url) {
         super.onPageFinished(view, url);
-        // Inject ad-blocking JavaScript
+        // Inject CSS to hide ads
+        view.evaluateJavascript(getCssInjectionScript(), null);
+        // Inject ad-blocking JavaScript (fetch/XHR and MutationObserver)
         view.evaluateJavascript(getAdBlockingScript(), null);
         // Inject background playback JavaScript
         view.evaluateJavascript(getBackgroundPlaybackScript(), null);
+    }
+
+    private String getCssInjectionScript() {
+        return "(function() {" +
+                "var style = document.createElement(\'style\');" +
+                "style.innerHTML = `" +
+                "  ytd-ad-slot-renderer, " +
+                "  ytd-promoted-sparkles-web-renderer, " +
+                "  ytd-promoted-video-renderer, " +
+                "  ytd-display-ad-renderer, " +
+                "  ytd-statement-banner-renderer, " +
+                "  ytd-in-feed-ad-layout-renderer, " +
+                "  ytd-banner-promo-renderer, " +
+                "  ytm-promoted-sparkles-web-renderer, " +
+                "  ytm-promoted-video-renderer, " +
+                "  ytm-statement-banner-renderer, " +
+                "  ytm-in-feed-ad-layout-renderer, " +
+                "  .ad-container, " +
+                "  .ad-showing, " +
+                "  .ad-display, " +
+                "  .ytp-ad-module, " +
+                "  .ytp-ad-image-overlay, " +
+                "  .video-ads, " +
+                "  .ytp-ad-progress-list, " +
+                "  #masthead-ad, " +
+                "  #player-ads, " +
+                "  #offers, " +
+                "  ad-slot-renderer, " +
+                "  ytm-companion-ad-renderer " +
+                "  { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; height: 0 !important; width: 0 !important; }`;" +
+                "document.head.appendChild(style);" +
+                "})();";
     }
 
     private String getAdBlockingScript() {
@@ -68,7 +104,7 @@ public class YTProWebViewClient extends WebViewClient {
                 "    var originalFetch = window.fetch;" +
                 "    window.fetch = function() {" +
                 "        var url = arguments[0].toString();" +
-                "        if (url.includes(\'googleads\') || url.includes(\'doubleclick\') || url.includes(\'ad_break\') || url.includes(\'pagead\') || url.includes(\'adservice.google.com\') || url.includes(\'youtube.com/api/ads\') || url.includes(\'googlesyndication.com\') || url.includes(\'adsystem.com\') || url.includes(\'ad.youtube.com\') || url.includes(\'doubleclick.net\') || url.includes(\'googleadservices.com\') || url.includes(\'ad.googlesyndication.com\')) {" +
+                "        if (url.includes(\'googleads\') || url.includes(\'doubleclick\') || url.includes(\'ad_break\') || url.includes(\'pagead\') || url.includes(\'adservice.google.com\') || url.includes(\'youtube.com/api/ads\') || url.includes(\'googlesyndication.com\') || url.includes(\'adsystem.com\') || url.includes(\'ad.youtube.com\') || url.includes(\'doubleclick.net\') || url.includes(\'googleadservices.com\') || url.includes(\'ad.googlesyndication.com\') || url.includes(\'policybazaar.com\') || url.includes(\'insurancedekho.com\')) {" +
                 "            console.log(\'Blocked fetch request: \' + url);" +
                 "            return Promise.resolve(new Response(\'\'));" +
                 "        }" +
@@ -94,7 +130,7 @@ public class YTProWebViewClient extends WebViewClient {
                 "    };" +
                 "    var originalXHRopen = XMLHttpRequest.prototype.open;" +
                 "    XMLHttpRequest.prototype.open = function(method, url) {" +
-                "        if (url.includes(\'googleads\') || url.includes(\'doubleclick\') || url.includes(\'ad_break\') || url.includes(\'pagead\') || url.includes(\'adservice.google.com\') || url.includes(\'youtube.com/api/ads\') || url.includes(\'googlesyndication.com\') || url.includes(\'adsystem.com\') || url.includes(\'ad.youtube.com\') || url.includes(\'doubleclick.net\') || url.includes(\'googleadservices.com\') || url.includes(\'ad.googlesyndication.com\')) {" +
+                "        if (url.includes(\'googleads\') || url.includes(\'doubleclick\') || url.includes(\'ad_break\') || url.includes(\'pagead\') || url.includes(\'adservice.google.com\') || url.includes(\'youtube.com/api/ads\') || url.includes(\'googlesyndication.com\') || url.includes(\'adsystem.com\') || url.includes(\'ad.youtube.com\') || url.includes(\'doubleclick.net\') || url.includes(\'googleadservices.com\') || url.includes(\'ad.googlesyndication.com\') || url.includes(\'policybazaar.com\') || url.includes(\'insurancedekho.com\')) {" +
                 "            console.log(\'Blocked XHR request: \' + url);" +
                 "            this._blocked = true;" +
                 "        }" +
@@ -108,6 +144,50 @@ public class YTProWebViewClient extends WebViewClient {
                 "        }" +
                 "        return originalXHRsend.apply(this, arguments);" +
                 "    };" +
+                "    " +
+                "    // MutationObserver to aggressively remove ad elements from DOM" +
+                "    var observer = new MutationObserver(function(mutations) {" +
+                "        mutations.forEach(function(mutation) {" +
+                "            if (mutation.addedNodes) {" +
+                "                mutation.addedNodes.forEach(function(node) {" +
+                "                    if (node.nodeType === 1) {" + // Element node
+                "                        var textContent = node.textContent || node.innerText || \'\';" +
+                "                        var lowerText = textContent.toLowerCase();" +
+                "                        if (lowerText.includes(\'sponsored\') || lowerText.includes(\'visit advertiser\') || lowerText.includes(\'ad •\')) {" +
+                "                            // Check if it\'s likely an ad container (not just a comment mentioning \'sponsored\')" +
+                "                            if (node.tagName.includes(\'YTD-\\\') || node.tagName.includes(\'YTM-\\\') || node.classList.contains(\'ad-container\') || node.querySelector(\".ad-container\") || node.querySelector(\"[aria-label=\\\"Sponsored\\\"]\") || node.querySelector(\'ytm-badge[class*=\\\"ad\\\"]\')) {" +
+                "                                console.log(\'Removed ad element via MutationObserver\');" +
+                "                                node.remove();" +
+                "                            }" +
+                "                        }" +
+                "                        // Remove specific ad tags" +
+                "                        var adTags = [\'ytd-ad-slot-renderer\', \'ytd-promoted-sparkles-web-renderer\', \'ytd-promoted-video-renderer\', \'ytd-display-ad-renderer\', \'ytd-in-feed-ad-layout-renderer\', \'ytm-promoted-sparkles-web-renderer\', \'ytm-promoted-video-renderer\', \'ytm-in-feed-ad-layout-renderer\', \'ytm-companion-ad-renderer\'];" +
+                "                        if (adTags.includes(node.tagName.toLowerCase())) {" +
+                "                            console.log(\'Removed specific ad tag: \' + node.tagName);" +
+                "                            node.remove();" +
+                "                        }" +
+                "                        // Search within the added node for ad elements" +
+                "                        adTags.forEach(function(tag) {" +
+                "                            var elements = node.querySelectorAll(tag);" +
+                "                            elements.forEach(function(el) { el.remove(); });" +
+                "                        });" +
+                "                        // Remove elements with \'Sponsored\' badge" +
+                "                        var sponsoredBadges = node.querySelectorAll(\'ytm-badge, ytd-badge-supported-renderer\');" +
+                "                        sponsoredBadges.forEach(function(badge) {" +
+                "                            if (badge.textContent.toLowerCase().includes(\'sponsored\') || badge.textContent.toLowerCase().includes(\'ad\')) {" +
+                "                                var container = badge.closest(\'ytm-item-section-renderer, ytd-rich-item-renderer, ytm-rich-item-renderer\');" +
+                "                                if (container) {" +
+                "                                    console.log(\'Removed sponsored container\');" +
+                "                                    container.remove();" +
+                "                                }" +
+                "                            }" +
+                "                        });" +
+                "                    }" +
+                "                });" +
+                "            }" +
+                "        });" +
+                "    });" +
+                "    observer.observe(document.documentElement, { childList: true, subtree: true });" +
                 "})();";
     }
 
