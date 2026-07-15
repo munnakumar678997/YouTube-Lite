@@ -83,14 +83,32 @@ public class YTProWebViewClient extends WebViewClient {
         view.evaluateJavascript(getBackgroundPlaybackScript(), null);
     }
 
+    @Override
+    public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+        String url = request.getUrl().toString();
+        // For YouTube URLs, let the WebView handle it (SPA navigation)
+        // But re-inject scripts after a short delay to handle new video
+        if (url.contains("youtube.com") || url.contains("youtu.be")) {
+            view.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    view.evaluateJavascript(getAdBlockScript(), null);
+                    view.evaluateJavascript(getBackgroundPlaybackScript(), null);
+                }
+            }, 500);
+            return false;
+        }
+        return false;
+    }
+
     private String getAdBlockScript() {
         return "(" + "function() {" +
-            "if (window._ytlAdBlockSetup) return;" +
-            "window._ytlAdBlockSetup = true;" +
 
-            // CSS to hide ad elements
-            "var css = document.createElement('style');" +
-            "css.textContent = '" +
+            // CSS to hide ad elements (always re-apply, no guard)
+            "if (!window._ytlAdCssAdded) {" +
+            "  window._ytlAdCssAdded = true;" +
+            "  var css = document.createElement('style');" +
+            "  css.textContent = '" +
             "ytm-promoted-sparkles-web-renderer," +
             "ytm-promoted-video-renderer," +
             "ytm-companion-ad-renderer," +
@@ -117,86 +135,108 @@ public class YTProWebViewClient extends WebViewClient {
             "[class*=\"ad-badge\"]," +
             "[class*=\"badge-style-type-ad\"]" +
             "{ display: none !important; height: 0 !important; overflow: hidden !important; }';" +
-            "document.head.appendChild(css);" +
+            "  document.head.appendChild(css);" +
+            "}" +
 
-            // AGGRESSIVE AD SKIP - This is the key fix for black screen
-            // YouTube now injects ads server-side into the video stream
-            // We detect ad state and immediately skip past it
+            // Main ad skip function - works on both desktop and mobile YouTube
             "function skipAds() {" +
             "  var v = document.querySelector('video');" +
             "  if (!v) return;" +
+            "  var adShowing = false;" +
 
-            // Method 1: Check for .ad-showing class on player
+            // Method 1: .ad-showing class on player (desktop YouTube)
             "  var player = document.querySelector('.html5-video-player');" +
-            "  var adShowing = player && player.classList.contains('ad-showing');" +
+            "  if (player && player.classList.contains('ad-showing')) adShowing = true;" +
 
-            // Method 2: Check for ad overlay elements
-            "  if (!adShowing) {" +
-            "    adShowing = !!document.querySelector('.ytp-ad-player-overlay, .ytp-ad-player-overlay-instream-info, .ytp-ad-text, .ytp-ad-preview-container, .ytp-ad-skip-button-slot');" +
-            "  }" +
+            // Method 2: Ad overlay elements (both mobile and desktop)
+            "  if (!adShowing && document.querySelector('.ytp-ad-player-overlay, .ytp-ad-player-overlay-instream-info, .ytp-ad-text, .ytp-ad-preview-container, .ytp-ad-skip-button-slot, .ytp-ad-message-container')) adShowing = true;" +
 
-            // Method 3: Check if video duration is suspiciously short (ad duration)
-            // and there's no proper title loaded yet
+            // Method 3: For mobile YouTube (m.youtube.com) - check ad-related attributes
+            "  if (!adShowing && document.querySelector('[class*=\"ad-interrupting\"], [class*=\"ad-created\"], .player-ads-container, ytm-promoted-sparkles-web-renderer')) adShowing = true;" +
+
+            // Method 4: Check video src for ad indicators
+            "  if (!adShowing && v.src && (v.src.indexOf('&ctier=') > -1 || v.src.indexOf('oad/') > -1)) adShowing = true;" +
+
+            // Method 5: If video duration is very short (< 60s) and different from expected content
+            // This catches server-side injected ads that show as separate short videos
+            "  if (!adShowing && v.duration > 0 && v.duration <= 31 && window._ytlExpectedLongVideo) adShowing = true;" +
+
             "  if (adShowing) {" +
-            "    v.currentTime = 9999;" +
+            "    v.currentTime = v.duration ? v.duration - 0.1 : 9999;" +
             "    v.playbackRate = 16;" +
+            "    var skipBtns = document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, [class*=\"skip-button\"], .ytp-ad-skip-button-container button, .videoAdUiSkipButton, button[id*=\"skip\"]');" +
+            "    skipBtns.forEach(function(b) { b.click(); });" +
             "  } else {" +
-            "    if (v.playbackRate === 16) v.playbackRate = 1;" +
+            "    if (v.playbackRate > 1 && v.playbackRate === 16) v.playbackRate = 1;" +
+            // Track that we expect a long video (content, not ad)
+            "    if (v.duration > 60) window._ytlExpectedLongVideo = true;" +
             "  }" +
-
-            // Click any skip button
-            "  var skipBtns = document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, [class*=\"skip-button\"], .ytp-ad-skip-button-container button');" +
-            "  skipBtns.forEach(function(b) { b.click(); });" +
-
-            // Remove ad overlay elements
-            "  var adEls = document.querySelectorAll('.ytp-ad-module, .video-ads, .ytp-ad-overlay-container, .ytp-ad-player-overlay');" +
-            "  adEls.forEach(function(el) { el.remove(); });" +
             "}" +
 
-            // Run ad skip very frequently
-            "setInterval(skipAds, 50);" +
+            // Run ad skip very frequently - 50ms
+            "if (!window._ytlAdSkipInterval) {" +
+            "  window._ytlAdSkipInterval = setInterval(skipAds, 50);" +
+            "}" +
+
+            // Watch for video element changes (new video loaded = SPA navigation)
+            "function watchVideoChanges() {" +
+            "  var v = document.querySelector('video');" +
+            "  if (!v) { setTimeout(watchVideoChanges, 500); return; }" +
+            "  if (v._ytlWatched) return;" +
+            "  v._ytlWatched = true;" +
+
+            // When video source changes, reset expected duration flag and check for ads
+            "  v.addEventListener('loadstart', function() {" +
+            "    window._ytlExpectedLongVideo = false;" +
+            "    setTimeout(skipAds, 100);" +
+            "    setTimeout(skipAds, 300);" +
+            "    setTimeout(skipAds, 500);" +
+            "    setTimeout(skipAds, 1000);" +
+            "    setTimeout(skipAds, 2000);" +
+            "  });" +
+
+            // When metadata loads, check duration for ad detection
+            "  v.addEventListener('loadedmetadata', function() {" +
+            "    skipAds();" +
+            "  });" +
+
+            // Force play when data is available
+            "  v.addEventListener('canplay', function() {" +
+            "    if (!window._ytlUserPaused && v.paused) {" +
+            "      v.play().catch(function(){});" +
+            "    }" +
+            "  });" +
+            "}" +
+            "watchVideoChanges();" +
 
             // MutationObserver to catch ads immediately when they appear
-            "var adMutObs = new MutationObserver(function(mutations) {" +
-            "  for (var i = 0; i < mutations.length; i++) {" +
-            "    var m = mutations[i];" +
-            "    if (m.type === 'attributes' && m.attributeName === 'class') {" +
-            "      var t = m.target;" +
-            "      if (t.classList && t.classList.contains('ad-showing')) {" +
-            "        skipAds();" +
+            "if (!window._ytlAdMutObsSetup) {" +
+            "  window._ytlAdMutObsSetup = true;" +
+            "  var adMutObs = new MutationObserver(function(mutations) {" +
+            "    for (var i = 0; i < mutations.length; i++) {" +
+            "      var m = mutations[i];" +
+            "      if (m.type === 'attributes' && m.attributeName === 'class') {" +
+            "        var t = m.target;" +
+            "        if (t.classList && (t.classList.contains('ad-showing') || t.classList.contains('ad-interrupting'))) {" +
+            "          skipAds();" +
+            "        }" +
+            "      }" +
+            "      if (m.type === 'childList') {" +
+            "        m.addedNodes.forEach(function(node) {" +
+            "          if (node.nodeType === 1) {" +
+            "            if (node.classList && (node.classList.contains('ytp-ad-module') || node.classList.contains('video-ads'))) {" +
+            "              skipAds();" +
+            "            }" +
+            "            if (node.tagName === 'VIDEO') {" +
+            "              watchVideoChanges();" +
+            "            }" +
+            "          }" +
+            "        });" +
             "      }" +
             "    }" +
-            "  }" +
-            "});" +
-            "var playerEl = document.querySelector('.html5-video-player');" +
-            "if (playerEl) {" +
-            "  adMutObs.observe(playerEl, {attributes: true, attributeFilter: ['class']});" +
-            "} else {" +
-            "  setTimeout(function() {" +
-            "    var p = document.querySelector('.html5-video-player');" +
-            "    if (p) adMutObs.observe(p, {attributes: true, attributeFilter: ['class']});" +
-            "  }, 2000);" +
-            "}" +
-
-            // MutationObserver to remove feed ads
-            "var feedObserver = new MutationObserver(function(mutations) {" +
-            "  mutations.forEach(function(mutation) {" +
-            "    mutation.addedNodes.forEach(function(node) {" +
-            "      if (node.nodeType !== 1) return;" +
-            "      var tag = node.tagName ? node.tagName.toLowerCase() : '';" +
-            "      if (tag.indexOf('ytd-ad') > -1 || tag.indexOf('ytm-promoted') > -1 || tag.indexOf('ytm-companion-ad') > -1 || tag === 'ytd-in-feed-ad-layout-renderer' || tag === 'ytd-carousel-ad-renderer') {" +
-            "        node.remove(); return;" +
-            "      }" +
-            "      var txt = (node.textContent || '').toLowerCase();" +
-            "      if ((txt.indexOf('sponsored') > -1 || txt.indexOf('visit advertiser') > -1) && txt.length < 2000) {" +
-            "        var parent = node.closest('ytm-item-section-renderer, ytd-rich-item-renderer, ytm-rich-item-renderer, ytm-video-with-context-renderer, ytm-promoted-sparkles-web-renderer');" +
-            "        if (parent) { parent.remove(); return; }" +
-            "        if (tag.indexOf('ytm-') > -1 || tag.indexOf('ytd-') > -1) { node.remove(); return; }" +
-            "      }" +
-            "    });" +
             "  });" +
-            "});" +
-            "feedObserver.observe(document.documentElement, {childList: true, subtree: true});" +
+            "  adMutObs.observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['class']});" +
+            "}" +
 
             // Remove existing feed ads
             "function removeExistingAds() {" +
@@ -206,65 +246,74 @@ public class YTProWebViewClient extends WebViewClient {
             "  });" +
             "}" +
             "removeExistingAds();" +
-            "setInterval(removeExistingAds, 2000);" +
+            "if (!window._ytlRemoveAdsInterval) {" +
+            "  window._ytlRemoveAdsInterval = setInterval(removeExistingAds, 2000);" +
+            "}" +
 
             // Intercept fetch to strip ad data from API responses
-            "var origFetch = window.fetch;" +
-            "window.fetch = function() {" +
-            "  var u = (arguments[0] && arguments[0].url) ? arguments[0].url : String(arguments[0]);" +
-            "  if (u.indexOf('doubleclick') > -1 || u.indexOf('googlesyndication') > -1 || u.indexOf('imasdk') > -1) {" +
-            "    return Promise.resolve(new Response('', {status: 200}));" +
-            "  }" +
-            "  return origFetch.apply(this, arguments).then(function(resp) {" +
-            "    if (u.indexOf('youtubei/v1/player') > -1) {" +
-            "      return resp.clone().text().then(function(t) {" +
-            "        try {" +
-            "          var j = JSON.parse(t);" +
-            "          delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
-            "          delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
-            "          if (j.playerResponse) {" +
-            "            delete j.playerResponse.adPlacements;" +
-            "            delete j.playerResponse.playerAds;" +
-            "            delete j.playerResponse.adSlots;" +
-            "            delete j.playerResponse.adBreakParams;" +
-            "          }" +
-            "          if (j.adPlacements) delete j.adPlacements;" +
-            "          if (j.playerAds) delete j.playerAds;" +
-            "          return new Response(JSON.stringify(j), {status: resp.status, headers: resp.headers});" +
-            "        } catch(e) { return resp; }" +
-            "      });" +
+            "if (!window._ytlFetchIntercepted) {" +
+            "  window._ytlFetchIntercepted = true;" +
+            "  var origFetch = window.fetch;" +
+            "  window.fetch = function() {" +
+            "    var u = (arguments[0] && arguments[0].url) ? arguments[0].url : String(arguments[0]);" +
+            "    if (u.indexOf('doubleclick') > -1 || u.indexOf('googlesyndication') > -1 || u.indexOf('imasdk') > -1) {" +
+            "      return Promise.resolve(new Response('', {status: 200}));" +
             "    }" +
-            "    return resp;" +
-            "  });" +
-            "};" +
+            "    return origFetch.apply(this, arguments).then(function(resp) {" +
+            "      if (u.indexOf('youtubei/v1/player') > -1) {" +
+            "        return resp.clone().text().then(function(t) {" +
+            "          try {" +
+            "            var j = JSON.parse(t);" +
+            "            delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
+            "            delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
+            "            if (j.playerResponse) {" +
+            "              delete j.playerResponse.adPlacements;" +
+            "              delete j.playerResponse.playerAds;" +
+            "              delete j.playerResponse.adSlots;" +
+            "              delete j.playerResponse.adBreakParams;" +
+            "            }" +
+            "            return new Response(JSON.stringify(j), {status: resp.status, headers: resp.headers});" +
+            "          } catch(e) { return resp; }" +
+            "        });" +
+            "      }" +
+            "      return resp;" +
+            "    });" +
+            "  };" +
+            "}" +
 
             // Intercept XHR for player requests to strip ads
-            "var origOpen = XMLHttpRequest.prototype.open;" +
-            "XMLHttpRequest.prototype.open = function(m, u) {" +
-            "  this._url = u || '';" +
-            "  if (u && (u.indexOf('doubleclick') > -1 || u.indexOf('googlesyndication') > -1)) {" +
-            "    this._blocked = true;" +
-            "  }" +
-            "  return origOpen.apply(this, arguments);" +
-            "};" +
-            "var origSend = XMLHttpRequest.prototype.send;" +
-            "XMLHttpRequest.prototype.send = function() {" +
-            "  if (this._blocked) return;" +
-            "  var self = this;" +
-            "  if (self._url && self._url.indexOf('youtubei/v1/player') > -1) {" +
-            "    var origOnLoad = self.onload;" +
-            "    self.onload = function() {" +
-            "      try {" +
-            "        var j = JSON.parse(self.responseText);" +
-            "        delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
-            "        delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
-            "        Object.defineProperty(self, 'responseText', {value: JSON.stringify(j)});" +
-            "      } catch(e) {}" +
-            "      if (origOnLoad) origOnLoad.apply(self, arguments);" +
-            "    };" +
-            "  }" +
-            "  return origSend.apply(this, arguments);" +
-            "};" +
+            "if (!window._ytlXHRIntercepted) {" +
+            "  window._ytlXHRIntercepted = true;" +
+            "  var origOpen = XMLHttpRequest.prototype.open;" +
+            "  XMLHttpRequest.prototype.open = function(m, u) {" +
+            "    this._url = u || '';" +
+            "    if (u && (u.indexOf('doubleclick') > -1 || u.indexOf('googlesyndication') > -1)) {" +
+            "      this._blocked = true;" +
+            "    }" +
+            "    return origOpen.apply(this, arguments);" +
+            "  };" +
+            "  var origSend = XMLHttpRequest.prototype.send;" +
+            "  XMLHttpRequest.prototype.send = function() {" +
+            "    if (this._blocked) return;" +
+            "    var self = this;" +
+            "    if (self._url && self._url.indexOf('youtubei/v1/player') > -1) {" +
+            "      var origOnReady = self.onreadystatechange;" +
+            "      self.onreadystatechange = function() {" +
+            "        if (self.readyState === 4) {" +
+            "          try {" +
+            "            var j = JSON.parse(self.responseText);" +
+            "            delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
+            "            delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
+            "            Object.defineProperty(self, 'responseText', {value: JSON.stringify(j), writable: false});" +
+            "            Object.defineProperty(self, 'response', {value: JSON.stringify(j), writable: false});" +
+            "          } catch(e) {}" +
+            "        }" +
+            "        if (origOnReady) origOnReady.apply(self, arguments);" +
+            "      };" +
+            "    }" +
+            "    return origSend.apply(this, arguments);" +
+            "  };" +
+            "}" +
 
             "})();";
     }
@@ -296,6 +345,8 @@ public class YTProWebViewClient extends WebViewClient {
             "function setupAutoplay() {" +
             "  var v = document.querySelector('video');" +
             "  if (!v) { setTimeout(setupAutoplay, 1000); return; }" +
+            "  if (v._ytlAutoplaySetup) return;" +
+            "  v._ytlAutoplaySetup = true;" +
             "  v.setAttribute('playsinline', '');" +
             "  v.setAttribute('webkit-playsinline', '');" +
             "  v.addEventListener('ended', function() {" +
@@ -309,7 +360,17 @@ public class YTProWebViewClient extends WebViewClient {
             "}" +
             "setupAutoplay();" +
 
-            // Re-setup on navigation (SPA)
+            // Re-setup on navigation (SPA) - watch for URL changes
+            "var lastUrl = location.href;" +
+            "setInterval(function() {" +
+            "  if (location.href !== lastUrl) {" +
+            "    lastUrl = location.href;" +
+            "    window._ytlExpectedLongVideo = false;" +
+            "    setTimeout(setupAutoplay, 1000);" +
+            "  }" +
+            "}, 500);" +
+
+            // Also watch title changes
             "var navObserver = new MutationObserver(function() { setTimeout(setupAutoplay, 1500); });" +
             "navObserver.observe(document.querySelector('title') || document.head, {childList: true, subtree: true});" +
             "})();";
