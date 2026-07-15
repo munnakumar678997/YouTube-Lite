@@ -5,10 +5,17 @@ import android.content.Intent;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.webkit.WebSettings;
-import androidx.appcompat.app.AppCompatActivity;
+import android.app.Activity;
+import android.view.View;
+import android.view.WindowManager;
+import android.webkit.CookieManager;
+import android.os.Build;
 import com.myapp.youtubelite.webview.YTProWebView;
+import com.myapp.youtubelite.webview.YTProWebViewClient;
+import com.myapp.youtubelite.webview.YTProWebChromeClient;
+import com.myapp.youtubelite.webview.WebAppInterface;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity {
 
     private YTProWebView webView;
 
@@ -18,12 +25,24 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
         webView = findViewById(R.id.youtube_webview);
         WebSettings webSettings = webView.getSettings();
         webSettings.setJavaScriptEnabled(true);
         webSettings.setDomStorageEnabled(true);
+        webSettings.setDatabaseEnabled(true);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
-        webSettings.setUserAgentString(webSettings.getUserAgentString().replace("wv", ""));
+        webSettings.setSupportZoom(true);
+        webSettings.setBuiltInZoomControls(true);
+        webSettings.setDisplayZoomControls(false);
+        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            cookieManager.setAcceptThirdPartyCookies(webView, true);
+        }
 
         webView.setWebViewClient(new YTProWebViewClient(this));
         webView.setWebChromeClient(new YTProWebChromeClient(this));

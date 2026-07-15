@@ -2,6 +2,7 @@ package com.myapp.youtubelite.webview;
 
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.webkit.JavascriptInterface;
 import android.widget.Toast;
 
@@ -23,27 +24,43 @@ public class WebAppInterface {
     public void play() {
         Intent serviceIntent = new Intent(mContext, ForegroundService.class);
         serviceIntent.setAction("com.myapp.youtubelite.ACTION_PLAY_PAUSE");
-        mContext.startService(serviceIntent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            mContext.startForegroundService(serviceIntent);
+        } else {
+            mContext.startService(serviceIntent);
+        }
     }
 
     @JavascriptInterface
     public void pause() {
         Intent serviceIntent = new Intent(mContext, ForegroundService.class);
         serviceIntent.setAction("com.myapp.youtubelite.ACTION_PLAY_PAUSE");
-        mContext.startService(serviceIntent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            mContext.startForegroundService(serviceIntent);
+        } else {
+            mContext.startService(serviceIntent);
+        }
     }
 
     @JavascriptInterface
     public void nextTrack() {
         Intent serviceIntent = new Intent(mContext, ForegroundService.class);
         serviceIntent.setAction("com.myapp.youtubelite.ACTION_NEXT");
-        mContext.startService(serviceIntent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            mContext.startForegroundService(serviceIntent);
+        } else {
+            mContext.startService(serviceIntent);
+        }
     }
 
     @JavascriptInterface
     public void previousTrack() {
         Intent serviceIntent = new Intent(mContext, ForegroundService.class);
         serviceIntent.setAction("com.myapp.youtubelite.ACTION_PREVIOUS");
-        mContext.startService(serviceIntent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            mContext.startForegroundService(serviceIntent);
+        } else {
+            mContext.startService(serviceIntent);
+        }
     }
 }

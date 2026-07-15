@@ -1,17 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-
-    <style name="Theme.YouTubeLite" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Primary brand color. -->
-        <item name="colorPrimary">@color/youtube_red</item>
-        <item name="colorPrimaryVariant">@color/youtube_red</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <!-- Secondary brand color. -->
-        <item name="colorSecondary">@color/teal_200</item>
-        <item name="colorSecondaryVariant">@color/teal_700</item>
-        <item name="colorOnSecondary">@color/black</item>
-        <!-- Status bar color. -->
-        <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
-        <!-- Customize your theme here. -->
-    </style>
+	<style name="Theme.YouTubeLite" parent="@android:style/Theme.Material.NoActionBar">
+		<item name="android:colorPrimary">#FF0000</item>
+		<item name="android:colorPrimaryDark">#CC0000</item>
+		<item name="android:colorAccent">#FF0000</item>
+		<item name="android:statusBarColor">#000000</item>
+		<item name="android:windowTranslucentStatus">false</item>
+		<item name="android:windowLightStatusBar">false</item>
+	</style>
 </resources>

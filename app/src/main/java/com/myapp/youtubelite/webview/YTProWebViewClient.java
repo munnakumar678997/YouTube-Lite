@@ -1,6 +1,5 @@
 package com.myapp.youtubelite.webview;
 
-import android.net.Uri;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
@@ -8,17 +7,9 @@ import android.webkit.WebViewClient;
 import android.content.Context;
 import android.util.Log;
 
-import androidx.annotation.Nullable;
-import androidx.webkit.WebResourceRequestCompat;
-import androidx.webkit.WebViewClientCompat;
-
 import java.io.ByteArrayInputStream;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
-import java.util.HashMap;
-import java.util.Map;
 
-public class YTProWebViewClient extends WebViewClientCompat {
+public class YTProWebViewClient extends WebViewClient {
 
     private static final String TAG = "YTProWebViewClient";
     private Context context;
@@ -27,7 +18,6 @@ public class YTProWebViewClient extends WebViewClientCompat {
         this.context = context;
     }
 
-    @Nullable
     @Override
     public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
         String url = request.getUrl().toString();
@@ -88,8 +78,7 @@ public class YTProWebViewClient extends WebViewClientCompat {
                 "        });" +
                 "    };" +
                 "    var originalXHRopen = XMLHttpRequest.prototype.open;" +
-                "    XMLHttpRequest.prototype.open = function(method, url) {
-" +
+                "    XMLHttpRequest.prototype.open = function(method, url) {" +
                 "        if (url.includes('googleads') || url.includes('doubleclick') || url.includes('ad_break') || url.includes('pagead')) {" +
                 "            console.log('Blocked XHR request: ' + url);" +
                 "            this._blocked = true;" +
