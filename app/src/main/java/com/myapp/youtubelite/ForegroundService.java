@@ -33,24 +33,49 @@ public class ForegroundService extends Service {
         createNotificationChannel();
         initMediaSession();
         notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "YouTubeLite::BgPlayback");
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "YouTubeLite::BgPlayback");
+        } catch (Exception e) {
+            Log.e("ForegroundService", "Failed to create WakeLock", e);
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        try {
+            startForeground(1, buildNotification(false));
+        } catch (Exception e) {
+            Log.e("ForegroundService", "Failed to start foreground", e);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
         if (intent != null && intent.getAction() != null) {
             handleIntent(intent);
         }
-        startForeground(1, buildNotification(false));
-        if (!wakeLock.isHeld()) wakeLock.acquire();
-        return START_NOT_STICKY;
+
+        try {
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                wakeLock.acquire(10 * 60 * 1000L); // 10 minutes max
+            }
+        } catch (Exception e) {
+            Log.e("ForegroundService", "Failed to acquire WakeLock", e);
+        }
+
+        return START_STICKY;
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
-        if (wakeLock != null && wakeLock.isHeld()) wakeLock.release();
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        } catch (Exception e) {
+            Log.e("ForegroundService", "Failed to release WakeLock", e);
+        }
         if (mediaSession != null) {
             mediaSession.setActive(false);
             mediaSession.release();
@@ -67,8 +92,11 @@ public class ForegroundService extends Service {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID, "Media Playback", NotificationManager.IMPORTANCE_LOW);
             channel.setDescription("Background playback controls");
+            channel.setSound(null, null);
             NotificationManager mgr = getSystemService(NotificationManager.class);
-            mgr.createNotificationChannel(channel);
+            if (mgr != null) {
+                mgr.createNotificationChannel(channel);
+            }
         }
     }
 
@@ -98,7 +126,7 @@ public class ForegroundService extends Service {
             }
         });
         mediaSession.setActive(true);
-        updatePlaybackState(PlaybackState.STATE_PAUSED);
+        updatePlaybackState(PlaybackState.STATE_PLAYING);
     }
 
     private void updatePlaybackState(int state) {
@@ -123,7 +151,7 @@ public class ForegroundService extends Service {
         }
 
         builder.setContentTitle("YouTube Lite")
-                .setContentText("Background Playback")
+                .setContentText(isPlaying ? "Playing" : "Background Playback")
                 .setSmallIcon(R.drawable.ic_play_button)
                 .setContentIntent(pendingIntent)
                 .setOngoing(true);
@@ -159,7 +187,9 @@ public class ForegroundService extends Service {
     }
 
     private void updateNotification(boolean isPlaying) {
-        notificationManager.notify(1, buildNotification(isPlaying));
+        if (notificationManager != null) {
+            notificationManager.notify(1, buildNotification(isPlaying));
+        }
     }
 
     private void handleIntent(Intent intent) {
@@ -183,7 +213,6 @@ public class ForegroundService extends Service {
                 stopSelf();
                 break;
             case ACTION_START_FOREGROUND_SERVICE:
-                // Service started, nothing specific to do here as it's handled in onStartCommand
                 break;
         }
     }

@@ -23,7 +23,7 @@ public class MainActivity extends Activity {
     private YTProWebView webView;
     private BroadcastReceiver playbackActionReceiver;
 
-    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface", "UnspecifiedRegisterReceiverFlag"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -40,26 +40,26 @@ public class MainActivity extends Activity {
         webSettings.setSupportZoom(true);
         webSettings.setBuiltInZoomControls(true);
         webSettings.setDisplayZoomControls(false);
+        webSettings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            cookieManager.setAcceptThirdPartyCookies(webView, true);
-        }
+        cookieManager.setAcceptThirdPartyCookies(webView, true);
 
         // Register BroadcastReceiver for playback actions
         playbackActionReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
                 String action = intent.getAction();
-                if (action != null) {
+                if (action != null && webView != null) {
                     switch (action) {
                         case ForegroundService.ACTION_PLAY_WEBVIEW:
-                            webView.evaluateJavascript("document.querySelector(\'video\').play();", null);
+                            webView.evaluateJavascript("document.querySelector('video').play();", null);
                             break;
                         case ForegroundService.ACTION_PAUSE_WEBVIEW:
-                            webView.evaluateJavascript("document.querySelector(\'video\').pause();", null);
+                            webView.evaluateJavascript("document.querySelector('video').pause();", null);
                             break;
                     }
                 }
@@ -68,7 +68,11 @@ public class MainActivity extends Activity {
         IntentFilter filter = new IntentFilter();
         filter.addAction(ForegroundService.ACTION_PLAY_WEBVIEW);
         filter.addAction(ForegroundService.ACTION_PAUSE_WEBVIEW);
-        registerReceiver(playbackActionReceiver, filter);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(playbackActionReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            registerReceiver(playbackActionReceiver, filter);
+        }
 
         webView.setWebViewClient(new YTProWebViewClient(this));
         webView.setWebChromeClient(new YTProWebChromeClient(this));
@@ -77,18 +81,26 @@ public class MainActivity extends Activity {
         webView.loadUrl("https://m.youtube.com");
 
         // Start foreground service to enable background playback
-        Intent serviceIntent = new Intent(this, ForegroundService.class);
-        serviceIntent.setAction(ForegroundService.ACTION_START_FOREGROUND_SERVICE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
-        } else {
-            startService(serviceIntent);
+        startBackgroundService();
+    }
+
+    private void startBackgroundService() {
+        try {
+            Intent serviceIntent = new Intent(this, ForegroundService.class);
+            serviceIntent.setAction(ForegroundService.ACTION_START_FOREGROUND_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+        } catch (Exception e) {
+            // Ignore if service fails to start
         }
     }
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && webView.canGoBack()) {
+        if (keyCode == KeyEvent.KEYCODE_BACK && webView != null && webView.canGoBack()) {
             webView.goBack();
             return true;
         }
@@ -104,25 +116,29 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        // Do not pause webView to allow background playback
-        // webView.onPause();
+        // Do NOT pause webView - allow background audio playback
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        webView.onResume();
-
+        if (webView != null) {
+            webView.onResume();
+        }
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (playbackActionReceiver != null) {
+            try {
+                unregisterReceiver(playbackActionReceiver);
+            } catch (Exception e) {
+                // Ignore if already unregistered
+            }
+        }
         if (webView != null) {
             webView.destroy();
-        }
-        if (playbackActionReceiver != null) {
-            unregisterReceiver(playbackActionReceiver);
         }
     }
 }

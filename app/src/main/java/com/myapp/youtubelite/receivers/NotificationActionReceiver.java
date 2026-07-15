@@ -3,6 +3,7 @@ package com.myapp.youtubelite.receivers;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.os.Build;
 import android.util.Log;
 
 import com.myapp.youtubelite.ForegroundService;
@@ -20,9 +21,17 @@ public class NotificationActionReceiver extends BroadcastReceiver {
             String action = intent.getAction();
             Log.d("NotificationActionReceiver", "Received action: " + action);
 
-            Intent serviceIntent = new Intent(context, ForegroundService.class);
-            serviceIntent.setAction(action);
-            context.startService(serviceIntent);
+            try {
+                Intent serviceIntent = new Intent(context, ForegroundService.class);
+                serviceIntent.setAction(action);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent);
+                } else {
+                    context.startService(serviceIntent);
+                }
+            } catch (Exception e) {
+                Log.e("NotificationActionReceiver", "Failed to start service", e);
+            }
         }
     }
 }
