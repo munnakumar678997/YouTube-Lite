@@ -91,10 +91,28 @@ public class MainActivity extends Activity {
                                 public void run() {
                                     webView.evaluateJavascript(
                                         "(function() {" +
-                                        "  var next = document.querySelector('.ytp-next-button, .ytm-autonav-bar a, a.ytm-next-button, [class*=\"next-button\"], .next-button');" +
-                                        "  if (next) { next.click(); return; }" +
-                                        "  var related = document.querySelector('ytm-compact-video-renderer a, ytd-compact-video-renderer a');" +
-                                        "  if (related) { related.click(); }" +
+                                        "  var selectors = [" +
+                                        "    '.ytp-next-button'," +
+                                        "    'button.next-button'," +
+                                        "    '.ytm-autonav-bar a'," +
+                                        "    'a.ytm-next-button'," +
+                                        "    '[aria-label=\"Next\"]'," +
+                                        "    '[aria-label=\"Next video\"]'," +
+                                        "    'button[aria-label=\"Next\"]'," +
+                                        "    '.player-controls-next'," +
+                                        "    '.skip-forward'," +
+                                        "    'ytm-pivot-bar-renderer a[href*=\"next\"]'" +
+                                        "  ];" +
+                                        "  for (var i = 0; i < selectors.length; i++) {" +
+                                        "    var el = document.querySelector(selectors[i]);" +
+                                        "    if (el) { el.click(); return; }" +
+                                        "  }" +
+                                        "  var endScreen = document.querySelector('a.ytp-endscreen-next, .ytm-endscreen-overlay a');" +
+                                        "  if (endScreen) { endScreen.click(); return; }" +
+                                        "  var related = document.querySelector('ytm-media-item a, ytm-compact-video-renderer a, ytd-compact-video-renderer a, ytm-video-with-context-renderer a, .related-chips-slot-wrapper a, .compact-media-item a');" +
+                                        "  if (related) { related.click(); return; }" +
+                                        "  var v = document.querySelector('video');" +
+                                        "  if (v) { v.currentTime = v.duration; }" +
                                         "})();", null);
                                 }
                             });
@@ -105,9 +123,21 @@ public class MainActivity extends Activity {
                                 public void run() {
                                     webView.evaluateJavascript(
                                         "(function() {" +
+                                        "  var selectors = [" +
+                                        "    '.ytp-prev-button'," +
+                                        "    'button.previous-button'," +
+                                        "    '[aria-label=\"Previous\"]'," +
+                                        "    '[aria-label=\"Previous video\"]'," +
+                                        "    'button[aria-label=\"Previous\"]'," +
+                                        "    '.player-controls-previous'" +
+                                        "  ];" +
+                                        "  for (var i = 0; i < selectors.length; i++) {" +
+                                        "    var el = document.querySelector(selectors[i]);" +
+                                        "    if (el) { el.click(); return; }" +
+                                        "  }" +
                                         "  var v = document.querySelector('video');" +
                                         "  if (v) {" +
-                                        "    if (v.currentTime > 5) {" +
+                                        "    if (v.currentTime > 3) {" +
                                         "      v.currentTime = 0;" +
                                         "    } else {" +
                                         "      window.history.back();" +
