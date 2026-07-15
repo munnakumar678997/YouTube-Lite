@@ -62,6 +62,7 @@ public class YTProWebViewClient extends WebViewClient {
         view.evaluateJavascript(getAdBlockingScript(), null);
         // Inject background playback JavaScript
         view.evaluateJavascript(getBackgroundPlaybackScript(), null);
+        view.evaluateJavascript(getAutoplayScript(), null);
     }
 
     private String getCssInjectionScript() {
@@ -188,6 +189,40 @@ public class YTProWebViewClient extends WebViewClient {
                 "        });" +
                 "    });" +
                 "    observer.observe(document.documentElement, { childList: true, subtree: true });" +
+                "})();";
+    }
+
+    private String getAutoplayScript() {
+        return "" +
+                "(function() {" +
+                "    function setupAutoplay() {" +
+                "        var video = document.querySelector(\'video\');" +
+                "        if (video) {" +
+                "            video.addEventListener(\'ended\', function() {" +
+                "                console.log(\'Video ended, attempting to play next.\');" +
+                "                var nextButton = document.querySelector(\".ytp-next-button\") || document.querySelector(\".ytm-next-button\");" +
+                "                if (nextButton) {" +
+                "                    nextButton.click();" +
+                "                    console.log(\'Clicked next button.\');" +
+                "                } else {" +
+                "                    console.log(\'Next button not found, trying to find related video.\');" +
+                "                    // Fallback for when there's no explicit next button (e.g., on mobile YouTube)" +
+                "                    var relatedVideo = document.querySelector(\'ytd-compact-video-renderer a#thumbnail, ytm-compact-video-renderer a#thumbnail\');" +
+                "                    if (relatedVideo) {" +
+                "                        relatedVideo.click();" +
+                "                        console.log(\'Clicked related video.\');" +
+                "                    } else {" +
+                "                        console.log(\'No next video or related video found.\');" +
+                "                    }" +
+                "                }" +
+                "            });" +
+                "            console.log(\'Autoplay event listener added to video.\');" +
+                "        } else {" +
+                "            console.log(\'Video element not found, retrying in 1 second.\');" +
+                "            setTimeout(setupAutoplay, 1000);" +
+                "        }" +
+                "    }" +
+                "    setupAutoplay();" +
                 "})();";
     }
 

@@ -19,6 +19,9 @@ import com.myapp.youtubelite.receivers.NotificationActionReceiver;
 public class ForegroundService extends Service {
 
     public static final String CHANNEL_ID = "Media";
+    public static final String ACTION_START_FOREGROUND_SERVICE = "com.myapp.youtubelite.ACTION_START_FOREGROUND_SERVICE";
+    public static final String ACTION_PLAY_WEBVIEW = "com.myapp.youtubelite.ACTION_PLAY_WEBVIEW";
+    public static final String ACTION_PAUSE_WEBVIEW = "com.myapp.youtubelite.ACTION_PAUSE_WEBVIEW";
     private MediaSession mediaSession;
     private PlaybackState playbackState;
     private NotificationManager notificationManager;
@@ -77,11 +80,13 @@ public class ForegroundService extends Service {
             public void onPlay() {
                 updatePlaybackState(PlaybackState.STATE_PLAYING);
                 updateNotification(true);
+                sendActionToMainActivity(ACTION_PLAY_WEBVIEW);
             }
             @Override
             public void onPause() {
                 updatePlaybackState(PlaybackState.STATE_PAUSED);
                 updateNotification(false);
+                sendActionToMainActivity(ACTION_PAUSE_WEBVIEW);
             }
             @Override
             public void onSkipToNext() {
@@ -177,6 +182,14 @@ public class ForegroundService extends Service {
             case NotificationActionReceiver.ACTION_STOP:
                 stopSelf();
                 break;
+            case ACTION_START_FOREGROUND_SERVICE:
+                // Service started, nothing specific to do here as it's handled in onStartCommand
+                break;
         }
+    }
+
+    private void sendActionToMainActivity(String action) {
+        Intent intent = new Intent(action);
+        sendBroadcast(intent);
     }
 }
