@@ -39,7 +39,15 @@ public class YTProWebViewClient extends WebViewClient {
         return url.contains("googleads") ||
                 url.contains("doubleclick") ||
                 url.contains("ad_break") ||
-                url.contains("pagead");
+                url.contains("pagead") ||
+                url.contains("adservice.google.com") ||
+                url.contains("youtube.com/api/ads") ||
+                url.contains("googlesyndication.com") ||
+                url.contains("adsystem.com") ||
+                url.contains("ad.youtube.com") ||
+                url.contains("doubleclick.net") ||
+                url.contains("googleadservices.com") ||
+                url.contains("ad.googlesyndication.com");
     }
 
     // Method to inject JavaScript after page load (for ad object stripping and MediaSession polyfill)
@@ -60,17 +68,24 @@ public class YTProWebViewClient extends WebViewClient {
                 "    var originalFetch = window.fetch;" +
                 "    window.fetch = function() {" +
                 "        var url = arguments[0].toString();" +
-                "        if (url.includes('googleads') || url.includes('doubleclick') || url.includes('ad_break') || url.includes('pagead')) {" +
-                "            console.log('Blocked fetch request: ' + url);" +
-                "            return Promise.resolve(new Response(''));" +
+                "        if (url.includes(\'googleads\') || url.includes(\'doubleclick\') || url.includes(\'ad_break\') || url.includes(\'pagead\') || url.includes(\'adservice.google.com\') || url.includes(\'youtube.com/api/ads\') || url.includes(\'googlesyndication.com\') || url.includes(\'adsystem.com\') || url.includes(\'ad.youtube.com\') || url.includes(\'doubleclick.net\') || url.includes(\'googleadservices.com\') || url.includes(\'ad.googlesyndication.com\')) {" +
+                "            console.log(\'Blocked fetch request: \' + url);" +
+                "            return Promise.resolve(new Response(\'\'));" +
                 "        }" +
                 "        return originalFetch.apply(this, arguments).then(response => {" +
-                "            if (url.includes('youtubei/v1')) {" +
+                "            if (url.includes(\'youtubei/v1\')) {" +
                 "                return response.clone().json().then(json => {" +
                 "                    if (json.adSlots) delete json.adSlots;" +
                 "                    if (json.playerAds) delete json.playerAds;" +
                 "                    if (json.adPlacements) delete json.adPlacements;" +
                 "                    if (json.adBreakHeartbeatParams) delete json.adBreakHeartbeatParams;" +
+                "                    if (json.playerResponse && json.playerResponse.adPlacements) delete json.playerResponse.adPlacements;" +
+                "                    if (json.playerResponse && json.playerResponse.playerAds) delete json.playerResponse.playerAds;" +
+                "                    if (json.playerResponse && json.playerResponse.adSlots) delete json.playerResponse.adSlots;" +
+                "                    if (json.playerResponse && json.playerResponse.playbackTracking && json.playerResponse.playbackTracking.videostatsPlaybackUrl) delete json.playerResponse.playbackTracking.videostatsPlaybackUrl;" +
+                "                    if (json.playerResponse && json.playerResponse.playbackTracking && json.playerResponse.playbackTracking.pTrackingUrl) delete json.playerResponse.playbackTracking.pTrackingUrl;" +
+                "                    if (json.playerResponse && json.playerResponse.adSafetyReason) delete json.playerResponse.adSafetyReason;" +
+                "                    if (json.playerResponse && json.playerResponse.playerConfig && json.playerResponse.playerConfig.ads) delete json.playerResponse.playerConfig.ads;" +
                 "                    return new Response(JSON.stringify(json), {headers: response.headers});" +
                 "                }).catch(() => response);" +
                 "            }" +
@@ -79,8 +94,8 @@ public class YTProWebViewClient extends WebViewClient {
                 "    };" +
                 "    var originalXHRopen = XMLHttpRequest.prototype.open;" +
                 "    XMLHttpRequest.prototype.open = function(method, url) {" +
-                "        if (url.includes('googleads') || url.includes('doubleclick') || url.includes('ad_break') || url.includes('pagead')) {" +
-                "            console.log('Blocked XHR request: ' + url);" +
+                "        if (url.includes(\'googleads\') || url.includes(\'doubleclick\') || url.includes(\'ad_break\') || url.includes(\'pagead\') || url.includes(\'adservice.google.com\') || url.includes(\'youtube.com/api/ads\') || url.includes(\'googlesyndication.com\') || url.includes(\'adsystem.com\') || url.includes(\'ad.youtube.com\') || url.includes(\'doubleclick.net\') || url.includes(\'googleadservices.com\') || url.includes(\'ad.googlesyndication.com\')) {" +
+                "            console.log(\'Blocked XHR request: \' + url);" +
                 "            this._blocked = true;" +
                 "        }" +
                 "        return originalXHRopen.apply(this, arguments);" +
@@ -88,7 +103,7 @@ public class YTProWebViewClient extends WebViewClient {
                 "    var originalXHRsend = XMLHttpRequest.prototype.send;" +
                 "    XMLHttpRequest.prototype.send = function() {" +
                 "        if (this._blocked) {" +
-                "            console.log('Prevented sending blocked XHR request.');" +
+                "            console.log(\'Prevented sending blocked XHR request.\');" +
                 "            return;" +
                 "        }" +
                 "        return originalXHRsend.apply(this, arguments);" +
@@ -100,11 +115,11 @@ public class YTProWebViewClient extends WebViewClient {
         // This script will polyfill MediaSession API and communicate with Android via JS bridge
         return "" +
                 "(function() {" +
-                "    if ('mediaSession' in navigator) {" +
-                "        navigator.mediaSession.setActionHandler('play', function() { Android.play(); });" +
-                "        navigator.mediaSession.setActionHandler('pause', function() { Android.pause(); });" +
-                "        navigator.mediaSession.setActionHandler('nexttrack', function() { Android.nextTrack(); });" +
-                "        navigator.mediaSession.setActionHandler('previoustrack', function() { Android.previousTrack(); });" +
+                "    if (\'mediaSession\' in navigator) {" +
+                "        navigator.mediaSession.setActionHandler(\'play\', function() { Android.play(); });" +
+                "        navigator.mediaSession.setActionHandler(\'pause\', function() { Android.pause(); });" +
+                "        navigator.mediaSession.setActionHandler(\'nexttrack\', function() { Android.nextTrack(); });" +
+                "        navigator.mediaSession.setActionHandler(\'previoustrack\', function() { Android.previousTrack(); });" +
                 "    }" +
                 "})();";
     }
