@@ -11,7 +11,7 @@ import com.myapp.youtubelite.ForegroundService;
 public class WebAppInterface {
     Context mContext;
 
-    WebAppInterface(Context c) {
+    public WebAppInterface(Context c) {
         mContext = c;
     }
 
