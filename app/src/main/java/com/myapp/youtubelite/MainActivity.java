@@ -112,10 +112,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         webView.onResume();
-        // Stop the foreground service when the app comes to foreground
-        Intent serviceIntent = new Intent(this, ForegroundService.class);
-        serviceIntent.setAction(ForegroundService.ACTION_STOP);
-        stopService(serviceIntent);
+
     }
 
     @Override

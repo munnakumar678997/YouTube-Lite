@@ -28,10 +28,6 @@ public class YTProWebViewClient extends WebViewClient {
             return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream("".getBytes()));
         }
 
-        // CSP stripping (simplified - a full implementation would modify headers)
-        // This is a placeholder for more complex CSP manipulation if needed.
-        // For now, we\'ll focus on blocking ad requests.
-
         return super.shouldInterceptRequest(view, request);
     }
 
@@ -91,7 +87,15 @@ public class YTProWebViewClient extends WebViewClient {
                 "  #player-ads, " +
                 "  #offers, " +
                 "  ad-slot-renderer, " +
-                "  ytm-companion-ad-renderer " +
+                "  ytm-companion-ad-renderer, " +
+                "  ytm-action-button-renderer:has(a[href*=\\"policybazaar\"]), " +
+                "  ytm-action-button-renderer:has(a[href*=\\"insurancedekho\"]), " +
+                "  ytm-item-section-renderer:has(ytm-badge:contains(\\"Sponsored\\")), " +
+                "  ytm-item-section-renderer:has(ytm-badge:contains(\\"Ad\\")), " +
+                "  ytd-carousel-ad-renderer, " +
+                "  ytd-promoted-sparkles-text-renderer, " +
+                "  ytd-compact-promoted-video-renderer, " +
+                "  ytd-engagement-panel-section-list-renderer[target-id=\\"engagement-panel-ads\\"] " +
                 "  { display: none !important; opacity: 0 !important; visibility: hidden !important; pointer-events: none !important; height: 0 !important; width: 0 !important; }`;" +
                 "document.head.appendChild(style);" +
                 "})();";
@@ -151,44 +155,7 @@ public class YTProWebViewClient extends WebViewClient {
                 "        mutations.forEach(function(mutation) {" +
                 "            if (mutation.addedNodes) {" +
                 "                mutation.addedNodes.forEach(function(node) {" +
-                "                    if (node.nodeType === 1) {" + // Element node
-                "                        var textContent = node.textContent || node.innerText || \'\';" +
-                "                        var lowerText = textContent.toLowerCase();" +
-                "                        if (lowerText.includes(\'sponsored\') || lowerText.includes(\'visit advertiser\') || lowerText.includes(\'ad •\')) {" +
-                "                            // Check if it\'s likely an ad container (not just a comment mentioning \'sponsored\')" +
-                "                            if (node.tagName.includes(\'YTD-\\\') || node.tagName.includes(\'YTM-\\\') || node.classList.contains(\'ad-container\') || node.querySelector(\".ad-container\") || node.querySelector(\"[aria-label=\\\"Sponsored\\\"]\") || node.querySelector(\'ytm-badge[class*=\\\"ad\\\"]\')) {" +
-                "                                console.log(\'Removed ad element via MutationObserver\');" +
-                "                                node.remove();" +
-                "                            }" +
-                "                        }" +
-                "                        // Remove specific ad tags" +
-                "                        var adTags = [\'ytd-ad-slot-renderer\', \'ytd-promoted-sparkles-web-renderer\', \'ytd-promoted-video-renderer\', \'ytd-display-ad-renderer\', \'ytd-in-feed-ad-layout-renderer\', \'ytm-promoted-sparkles-web-renderer\', \'ytm-promoted-video-renderer\', \'ytm-in-feed-ad-layout-renderer\', \'ytm-companion-ad-renderer\'];" +
-                "                        if (adTags.includes(node.tagName.toLowerCase())) {" +
-                "                            console.log(\'Removed specific ad tag: \' + node.tagName);" +
-                "                            node.remove();" +
-                "                        }" +
-                "                        // Search within the added node for ad elements" +
-                "                        adTags.forEach(function(tag) {" +
-                "                            var elements = node.querySelectorAll(tag);" +
-                "                            elements.forEach(function(el) { el.remove(); });" +
-                "                        });" +
-                "                        // Remove elements with \'Sponsored\' badge" +
-                "                        var sponsoredBadges = node.querySelectorAll(\'ytm-badge, ytd-badge-supported-renderer\');" +
-                "                        sponsoredBadges.forEach(function(badge) {" +
-                "                            if (badge.textContent.toLowerCase().includes(\'sponsored\') || badge.textContent.toLowerCase().includes(\'ad\')) {" +
-                "                                var container = badge.closest(\'ytm-item-section-renderer, ytd-rich-item-renderer, ytm-rich-item-renderer\');" +
-                "                                if (container) {" +
-                "                                    console.log(\'Removed sponsored container\');" +
-                "                                    container.remove();" +
-                "                                }" +
-                "                            }" +
-                "                        });" +
-                "                    }" +
-                "                });" +
-                "            }" +
-                "        });" +
-                "    });" +
-                "    observer.observe(document.documentElement, { childList: true, subtree: true });" +
+                "                    if (node.nodeType === 1) { // Element node\n                        var textContent = node.textContent || node.innerText || \'\';\n                        var lowerText = textContent.toLowerCase();\n                        if (lowerText.includes(\'sponsored\') || lowerText.includes(\'visit advertiser\') || lowerText.includes(\'ad •\')) {\n                            // Check if it\'s likely an ad container (not just a comment mentioning \'sponsored\')\n                            if (node.tagName.includes(\'YTD-\\') || node.tagName.includes(\'YTM-\\') || node.classList.contains(\'ad-container\') || node.querySelector(\".ad-container\") || node.querySelector(\"[aria-label=\\"Sponsored\\"]\") || node.querySelector(\'ytm-badge[class*=\\"ad\\"]\')) {\n                                console.log(\'Removed ad element via MutationObserver\');\n                                node.remove();\n                            }\n                        }\n                        // Remove specific ad tags\n                        var adTags = [\'ytd-ad-slot-renderer\', \'ytd-promoted-sparkles-web-renderer\', \'ytd-promoted-video-renderer\', \'ytd-display-ad-renderer\', \'ytd-in-feed-ad-layout-renderer\', \'ytm-promoted-sparkles-web-renderer\', \'ytm-promoted-video-renderer\', \'ytm-in-feed-ad-layout-renderer\', \'ytm-companion-ad-renderer\', \'ytd-carousel-ad-renderer\', \'ytd-promoted-sparkles-text-renderer\', \'ytd-compact-promoted-video-renderer\', \'ytd-engagement-panel-section-list-renderer[target-id=\\"engagement-panel-ads\\"]\'];\n                        if (adTags.includes(node.tagName.toLowerCase())) {\n                            console.log(\'Removed specific ad tag: \' + node.tagName);\n                            node.remove();\n                        }\n                        // Search within the added node for ad elements\n                        adTags.forEach(function(tag) {\n                            var elements = node.querySelectorAll(tag);\n                            elements.forEach(function(el) { el.remove(); });\n                        });\n                        // Remove elements with \'Sponsored\' badge\n                        var sponsoredBadges = node.querySelectorAll(\'ytm-badge, ytd-badge-supported-renderer, .badge-style-type-ad\');\n                        sponsoredBadges.forEach(function(badge) {\n                            if (badge.textContent.toLowerCase().includes(\'sponsored\') || badge.textContent.toLowerCase().includes(\'ad\')) {\n                                var container = badge.closest(\'ytm-item-section-renderer, ytd-rich-item-renderer, ytm-rich-item-renderer, ytm-video-with-context-renderer\');\n                                if (container) {\n                                    console.log(\'Removed sponsored container\');\n                                    container.remove();\n                                }\n                            }\n                        });\n                        \n                        // Also check the node itself if it\'s a container\n                        if (node.tagName && (node.tagName.toLowerCase() === \'ytm-item-section-renderer\' || node.tagName.toLowerCase() === \'ytd-rich-item-renderer\' || node.tagName.toLowerCase() === \'ytm-rich-item-renderer\' || node.tagName.toLowerCase() === \'ytm-video-with-context-renderer\')) {\n                            var badges = node.querySelectorAll(\'ytm-badge, ytd-badge-supported-renderer, .badge-style-type-ad\');\n                            badges.forEach(function(badge) {\n                                if (badge.textContent.toLowerCase().includes(\'sponsored\') || badge.textContent.toLowerCase().includes(\'ad\')) {\n                                    console.log(\'Removed sponsored container (self)\');\n                                    node.remove();\n                                }\n                            });\n                            \n                            // Check for \"Visit Advertiser\" text\n                            if (node.textContent.toLowerCase().includes(\'visit advertiser\')) {\n                                console.log(\'Removed visit advertiser container (self)\');\n                                node.remove();\n                            }\n                        }\n                    }\n                });\n            }\n        });\n    });\n    observer.observe(document.documentElement, { childList: true, subtree: true });" +
                 "})();";
     }
 
@@ -206,7 +173,7 @@ public class YTProWebViewClient extends WebViewClient {
                 "                    console.log(\'Clicked next button.\');" +
                 "                } else {" +
                 "                    console.log(\'Next button not found, trying to find related video.\');" +
-                "                    // Fallback for when there's no explicit next button (e.g., on mobile YouTube)" +
+                "                    // Fallback for when there\'s no explicit next button (e.g., on mobile YouTube)" +
                 "                    var relatedVideo = document.querySelector(\'ytd-compact-video-renderer a#thumbnail, ytm-compact-video-renderer a#thumbnail\');" +
                 "                    if (relatedVideo) {" +
                 "                        relatedVideo.click();" +
@@ -227,14 +194,48 @@ public class YTProWebViewClient extends WebViewClient {
     }
 
     private String getBackgroundPlaybackScript() {
-        // This script will polyfill MediaSession API and communicate with Android via JS bridge
         return "" +
                 "(function() {" +
-                "    if (\'mediaSession\' in navigator) {" +
-                "        navigator.mediaSession.setActionHandler(\'play\', function() { Android.play(); });" +
-                "        navigator.mediaSession.setActionHandler(\'pause\', function() { Android.pause(); });" +
-                "        navigator.mediaSession.setActionHandler(\'nexttrack\', function() { Android.nextTrack(); });" +
-                "        navigator.mediaSession.setActionHandler(\'previoustrack\', function() { Android.previousTrack(); });" +
+                "    var video = document.querySelector(\'video\');" +
+                "    if (video) {" +
+                "        video.setAttribute(\'playsinline\', \'\');" +
+                "        video.setAttribute(\'webkit-playsinline\', \'\');" +
+                "        video.play(); // Attempt to play immediately to enable background playback
+" +
+                "        // Use Media Session API for better background control and notifications
+" +
+                "        if ('mediaSession' in navigator) {" +
+                "            navigator.mediaSession.setActionHandler('play', function() { video.play(); });" +
+                "            navigator.mediaSession.setActionHandler('pause', function() { video.pause(); });" +
+                "            navigator.mediaSession.setActionHandler('previoustrack', function() { window.history.back(); });" +
+                "            navigator.mediaSession.setActionHandler('nexttrack', function() { /* Implement next track logic if available */ });" +
+                "            // Update metadata if available
+" +
+                "            var updateMediaSession = function() {" +
+                "                if (document.title) {" +
+                "                    navigator.mediaSession.metadata = new MediaMetadata({" +
+                "                        title: document.title," +
+                "                        artist: document.querySelector(\'#owner-name a\') ? document.querySelector(\'#owner-name a\').innerText : \'Unknown Artist\'," +
+                "                        album: \'YouTube Lite\'," +
+                "                        artwork: [" +
+                "                            { src: \'https://www.youtube.com/s/desktop/e913708d/img/favicon_96x96.png\', sizes: \'96x96\', type: \'image/png\' }" +
+                "                        ]" +
+                "                    });" +
+                "                }" +
+                "            };
+" +
+                "            updateMediaSession();
+" +
+                "            // Observe changes in title for dynamic updates
+" +
+                "            var titleObserver = new MutationObserver(updateMediaSession);
+" +
+                "            titleObserver.observe(document.querySelector(\'title\'), { childList: true });" +
+                "        }" +
+                "        console.log(\'Background playback script injected and Media Session API configured.\');" +
+                "    } else {" +
+                "        console.log(\'Video element not found for background playback, retrying in 1 second.\');" +
+                "        setTimeout(function() {\n            var videoRetry = document.querySelector(\'video\');\n            if (videoRetry) {\n                videoRetry.setAttribute(\'playsinline\', \'\');\n                videoRetry.setAttribute(\'webkit-playsinline\', \'\');\n                videoRetry.play();\n                console.log(\'Video element found and playsinline set on retry.\');\n            } else {\n                console.log(\'Video element still not found after retry.\');\n            }\n        }, 1000);" +
                 "    }" +
                 "})();";
     }
