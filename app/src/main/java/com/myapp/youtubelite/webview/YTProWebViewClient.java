@@ -22,7 +22,6 @@ public class YTProWebViewClient extends WebViewClient {
     public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
         String url = request.getUrl().toString().toLowerCase();
 
-        // Only block clearly ad-serving URLs that won't affect video playback
         if (isAdUrl(url)) {
             Log.d(TAG, "Blocked ad URL: " + url);
             return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream("".getBytes()));
@@ -32,7 +31,7 @@ public class YTProWebViewClient extends WebViewClient {
     }
 
     private boolean isAdUrl(String url) {
-        // NEVER block these - they are essential for video playback
+        // NEVER block video/player/content URLs
         if (url.contains("googlevideo.com") ||
             url.contains("videoplayback") ||
             url.contains("youtubei/v1/player") ||
@@ -79,36 +78,32 @@ public class YTProWebViewClient extends WebViewClient {
     @Override
     public void onPageFinished(WebView view, String url) {
         super.onPageFinished(view, url);
-        view.evaluateJavascript(getAdBlockScript(), null);
-        view.evaluateJavascript(getBackgroundPlaybackScript(), null);
+        view.evaluateJavascript(getMasterScript(), null);
     }
 
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
         String url = request.getUrl().toString();
-        // For YouTube URLs, let the WebView handle it (SPA navigation)
-        // But re-inject scripts after a short delay to handle new video
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
             view.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    view.evaluateJavascript(getAdBlockScript(), null);
-                    view.evaluateJavascript(getBackgroundPlaybackScript(), null);
+                    view.evaluateJavascript(getMasterScript(), null);
                 }
-            }, 500);
+            }, 300);
             return false;
         }
         return false;
     }
 
-    private String getAdBlockScript() {
+    private String getMasterScript() {
         return "(" + "function() {" +
+            "if (window._ytlMasterV3) return;" +
+            "window._ytlMasterV3 = true;" +
 
-            // CSS to hide ad elements (always re-apply, no guard)
-            "if (!window._ytlAdCssAdded) {" +
-            "  window._ytlAdCssAdded = true;" +
-            "  var css = document.createElement('style');" +
-            "  css.textContent = '" +
+            // ============ CSS AD HIDE ============
+            "var css = document.createElement('style');" +
+            "css.textContent = '" +
             "ytm-promoted-sparkles-web-renderer," +
             "ytm-promoted-video-renderer," +
             "ytm-companion-ad-renderer," +
@@ -118,7 +113,6 @@ public class YTProWebViewClient extends WebViewClient {
             "ytd-display-ad-renderer," +
             "ytd-in-feed-ad-layout-renderer," +
             "ytd-banner-promo-renderer," +
-            "ytd-statement-banner-renderer," +
             "ytd-carousel-ad-renderer," +
             "ytd-compact-promoted-video-renderer," +
             ".ad-container," +
@@ -130,208 +124,16 @@ public class YTProWebViewClient extends WebViewClient {
             "#masthead-ad," +
             "#player-ads," +
             "#ad-slot," +
-            "ad-slot-renderer," +
-            ".ytm-promoted-sparkles-web-renderer," +
             "[class*=\"ad-badge\"]," +
             "[class*=\"badge-style-type-ad\"]" +
             "{ display: none !important; height: 0 !important; overflow: hidden !important; }';" +
-            "  document.head.appendChild(css);" +
-            "}" +
+            "document.head.appendChild(css);" +
 
-            // Main ad skip function - works on both desktop and mobile YouTube
-            "function skipAds() {" +
-            "  var v = document.querySelector('video');" +
-            "  if (!v) return;" +
-            "  var adShowing = false;" +
-
-            // Method 1: .ad-showing class on player (desktop YouTube)
-            "  var player = document.querySelector('.html5-video-player');" +
-            "  if (player && player.classList.contains('ad-showing')) adShowing = true;" +
-
-            // Method 2: Ad overlay elements (both mobile and desktop)
-            "  if (!adShowing && document.querySelector('.ytp-ad-player-overlay, .ytp-ad-player-overlay-instream-info, .ytp-ad-text, .ytp-ad-preview-container, .ytp-ad-skip-button-slot, .ytp-ad-message-container')) adShowing = true;" +
-
-            // Method 3: For mobile YouTube (m.youtube.com) - check ad-related attributes
-            "  if (!adShowing && document.querySelector('[class*=\"ad-interrupting\"], [class*=\"ad-created\"], .player-ads-container, ytm-promoted-sparkles-web-renderer')) adShowing = true;" +
-
-            // Method 4: Check video src for ad indicators
-            "  if (!adShowing && v.src && (v.src.indexOf('&ctier=') > -1 || v.src.indexOf('oad/') > -1)) adShowing = true;" +
-
-            // Method 5: If video duration is very short (< 60s) and different from expected content
-            // This catches server-side injected ads that show as separate short videos
-            "  if (!adShowing && v.duration > 0 && v.duration <= 31 && window._ytlExpectedLongVideo) adShowing = true;" +
-
-            "  if (adShowing) {" +
-            "    v.currentTime = v.duration ? v.duration - 0.1 : 9999;" +
-            "    v.playbackRate = 16;" +
-            "    var skipBtns = document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, [class*=\"skip-button\"], .ytp-ad-skip-button-container button, .videoAdUiSkipButton, button[id*=\"skip\"]');" +
-            "    skipBtns.forEach(function(b) { b.click(); });" +
-            "  } else {" +
-            "    if (v.playbackRate > 1 && v.playbackRate === 16) v.playbackRate = 1;" +
-            // Track that we expect a long video (content, not ad)
-            "    if (v.duration > 60) window._ytlExpectedLongVideo = true;" +
-            "  }" +
-            "}" +
-
-            // Run ad skip very frequently - 50ms
-            "if (!window._ytlAdSkipInterval) {" +
-            "  window._ytlAdSkipInterval = setInterval(skipAds, 50);" +
-            "}" +
-
-            // Watch for video element changes (new video loaded = SPA navigation)
-            "function watchVideoChanges() {" +
-            "  var v = document.querySelector('video');" +
-            "  if (!v) { setTimeout(watchVideoChanges, 500); return; }" +
-            "  if (v._ytlWatched) return;" +
-            "  v._ytlWatched = true;" +
-
-            // When video source changes, reset expected duration flag and check for ads
-            "  v.addEventListener('loadstart', function() {" +
-            "    window._ytlExpectedLongVideo = false;" +
-            "    setTimeout(skipAds, 100);" +
-            "    setTimeout(skipAds, 300);" +
-            "    setTimeout(skipAds, 500);" +
-            "    setTimeout(skipAds, 1000);" +
-            "    setTimeout(skipAds, 2000);" +
-            "  });" +
-
-            // When metadata loads, check duration for ad detection
-            "  v.addEventListener('loadedmetadata', function() {" +
-            "    skipAds();" +
-            "  });" +
-
-            // Force play when data is available
-            "  v.addEventListener('canplay', function() {" +
-            "    if (!window._ytlUserPaused && v.paused) {" +
-            "      v.play().catch(function(){});" +
-            "    }" +
-            "  });" +
-            "}" +
-            "watchVideoChanges();" +
-
-            // MutationObserver to catch ads immediately when they appear
-            "if (!window._ytlAdMutObsSetup) {" +
-            "  window._ytlAdMutObsSetup = true;" +
-            "  var adMutObs = new MutationObserver(function(mutations) {" +
-            "    for (var i = 0; i < mutations.length; i++) {" +
-            "      var m = mutations[i];" +
-            "      if (m.type === 'attributes' && m.attributeName === 'class') {" +
-            "        var t = m.target;" +
-            "        if (t.classList && (t.classList.contains('ad-showing') || t.classList.contains('ad-interrupting'))) {" +
-            "          skipAds();" +
-            "        }" +
-            "      }" +
-            "      if (m.type === 'childList') {" +
-            "        m.addedNodes.forEach(function(node) {" +
-            "          if (node.nodeType === 1) {" +
-            "            if (node.classList && (node.classList.contains('ytp-ad-module') || node.classList.contains('video-ads'))) {" +
-            "              skipAds();" +
-            "            }" +
-            "            if (node.tagName === 'VIDEO') {" +
-            "              watchVideoChanges();" +
-            "            }" +
-            "          }" +
-            "        });" +
-            "      }" +
-            "    }" +
-            "  });" +
-            "  adMutObs.observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['class']});" +
-            "}" +
-
-            // Remove existing feed ads
-            "function removeExistingAds() {" +
-            "  var selectors = ['ytm-promoted-sparkles-web-renderer','ytd-ad-slot-renderer','ytd-in-feed-ad-layout-renderer','ytm-companion-ad-renderer','ytd-carousel-ad-renderer','ytd-promoted-video-renderer','ytd-display-ad-renderer','.ad-container','.ytp-ad-module','.video-ads','#masthead-ad','#player-ads'];" +
-            "  selectors.forEach(function(s) {" +
-            "    document.querySelectorAll(s).forEach(function(el) { el.remove(); });" +
-            "  });" +
-            "}" +
-            "removeExistingAds();" +
-            "if (!window._ytlRemoveAdsInterval) {" +
-            "  window._ytlRemoveAdsInterval = setInterval(removeExistingAds, 2000);" +
-            "}" +
-
-            // Intercept fetch to strip ad data from API responses
-            "if (!window._ytlFetchIntercepted) {" +
-            "  window._ytlFetchIntercepted = true;" +
-            "  var origFetch = window.fetch;" +
-            "  window.fetch = function() {" +
-            "    var u = (arguments[0] && arguments[0].url) ? arguments[0].url : String(arguments[0]);" +
-            "    if (u.indexOf('doubleclick') > -1 || u.indexOf('googlesyndication') > -1 || u.indexOf('imasdk') > -1) {" +
-            "      return Promise.resolve(new Response('', {status: 200}));" +
-            "    }" +
-            "    return origFetch.apply(this, arguments).then(function(resp) {" +
-            "      if (u.indexOf('youtubei/v1/player') > -1) {" +
-            "        return resp.clone().text().then(function(t) {" +
-            "          try {" +
-            "            var j = JSON.parse(t);" +
-            "            delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
-            "            delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
-            "            if (j.playerResponse) {" +
-            "              delete j.playerResponse.adPlacements;" +
-            "              delete j.playerResponse.playerAds;" +
-            "              delete j.playerResponse.adSlots;" +
-            "              delete j.playerResponse.adBreakParams;" +
-            "            }" +
-            "            return new Response(JSON.stringify(j), {status: resp.status, headers: resp.headers});" +
-            "          } catch(e) { return resp; }" +
-            "        });" +
-            "      }" +
-            "      return resp;" +
-            "    });" +
-            "  };" +
-            "}" +
-
-            // Intercept XHR for player requests to strip ads
-            "if (!window._ytlXHRIntercepted) {" +
-            "  window._ytlXHRIntercepted = true;" +
-            "  var origOpen = XMLHttpRequest.prototype.open;" +
-            "  XMLHttpRequest.prototype.open = function(m, u) {" +
-            "    this._url = u || '';" +
-            "    if (u && (u.indexOf('doubleclick') > -1 || u.indexOf('googlesyndication') > -1)) {" +
-            "      this._blocked = true;" +
-            "    }" +
-            "    return origOpen.apply(this, arguments);" +
-            "  };" +
-            "  var origSend = XMLHttpRequest.prototype.send;" +
-            "  XMLHttpRequest.prototype.send = function() {" +
-            "    if (this._blocked) return;" +
-            "    var self = this;" +
-            "    if (self._url && self._url.indexOf('youtubei/v1/player') > -1) {" +
-            "      var origOnReady = self.onreadystatechange;" +
-            "      self.onreadystatechange = function() {" +
-            "        if (self.readyState === 4) {" +
-            "          try {" +
-            "            var j = JSON.parse(self.responseText);" +
-            "            delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
-            "            delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
-            "            Object.defineProperty(self, 'responseText', {value: JSON.stringify(j), writable: false});" +
-            "            Object.defineProperty(self, 'response', {value: JSON.stringify(j), writable: false});" +
-            "          } catch(e) {}" +
-            "        }" +
-            "        if (origOnReady) origOnReady.apply(self, arguments);" +
-            "      };" +
-            "    }" +
-            "    return origSend.apply(this, arguments);" +
-            "  };" +
-            "}" +
-
-            "})();";
-    }
-
-    private String getBackgroundPlaybackScript() {
-        return "(" + "function() {" +
-            "if (window._ytlBgPlaySetup) return;" +
-            "window._ytlBgPlaySetup = true;" +
-
-            // Override visibility API to trick YouTube into thinking page is always visible
-            "Object.defineProperty(document, 'hidden', {get: function() { return false; }});" +
-            "Object.defineProperty(document, 'visibilityState', {get: function() { return 'visible'; }});" +
+            // ============ BACKGROUND PLAYBACK ============
+            "Object.defineProperty(document, 'hidden', {get: function() { return false; }, configurable: true});" +
+            "Object.defineProperty(document, 'visibilityState', {get: function() { return 'visible'; }, configurable: true});" +
             "document.addEventListener('visibilitychange', function(e) { e.stopImmediatePropagation(); }, true);" +
-
-            // Flag to track user-initiated pause from notification
             "window._ytlUserPaused = false;" +
-
-            // Override pause to prevent YouTube from auto-pausing, but allow user-initiated pause
             "var origPause = HTMLVideoElement.prototype.pause;" +
             "HTMLVideoElement.prototype.pause = function() {" +
             "  if (window._ytlUserPaused) {" +
@@ -341,12 +143,244 @@ public class YTProWebViewClient extends WebViewClient {
             "  return undefined;" +
             "};" +
 
-            // Auto-play next video when current ends
+            // ============ AD SKIP LOGIC ============
+            "function isAdPlaying() {" +
+            "  var player = document.querySelector('.html5-video-player');" +
+            "  if (player && player.classList.contains('ad-showing')) return true;" +
+            "  if (document.querySelector('.ytp-ad-player-overlay, .ytp-ad-player-overlay-instream-info, .ytp-ad-text, .ytp-ad-preview-container, .ytp-ad-skip-button-slot, .ytp-ad-message-container')) return true;" +
+            "  if (document.querySelector('[class*=\"ad-interrupting\"], [class*=\"ad-created\"], .player-ads-container')) return true;" +
+            "  return false;" +
+            "}" +
+
+            "function skipAd() {" +
+            "  var v = document.querySelector('video');" +
+            "  if (!v) return;" +
+            "  if (isAdPlaying()) {" +
+            "    v.currentTime = v.duration ? v.duration - 0.1 : 9999;" +
+            "    v.playbackRate = 16;" +
+            "    var skipBtns = document.querySelectorAll('.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, [class*=\"skip-button\"], .ytp-ad-skip-button-container button, .videoAdUiSkipButton');" +
+            "    skipBtns.forEach(function(b) { b.click(); });" +
+            "    return true;" +
+            "  }" +
+            "  if (v.playbackRate === 16) v.playbackRate = 1;" +
+            "  return false;" +
+            "}" +
+            "setInterval(skipAd, 50);" +
+
+            // ============ STALL DETECTION & FORCE PLAY ============
+            // This is the KEY fix for the black screen on 2nd video
+            // When YouTube navigates to a new video (SPA), the video element
+            // often gets stuck in a loading/stalled state. We detect this and
+            // force the video to play by clicking the player or calling play()
+            "var _stallCheckStart = 0;" +
+            "var _lastVideoTime = -1;" +
+            "var _lastVideoSrc = '';" +
+
+            "function checkStall() {" +
+            "  var v = document.querySelector('video');" +
+            "  if (!v) return;" +
+            "  if (window._ytlUserPaused) return;" +
+            "  if (isAdPlaying()) return;" +  // Don't interfere with ad skip
+
+            // Detect if video source changed (new video navigation)
+            "  var currentSrc = v.currentSrc || v.src || '';" +
+            "  if (currentSrc !== _lastVideoSrc) {" +
+            "    _lastVideoSrc = currentSrc;" +
+            "    _stallCheckStart = Date.now();" +
+            "    _lastVideoTime = -1;" +
+            "  }" +
+
+            // Check if video is stuck (paused or not progressing)
+            "  var isStuck = false;" +
+            "  if (v.paused && !v.ended && v.readyState >= 2) {" +
+            "    isStuck = true;" +
+            "  }" +
+            "  if (!v.paused && v.currentTime === _lastVideoTime && v.readyState < 3) {" +
+            "    isStuck = true;" +
+            "  }" +
+            "  _lastVideoTime = v.currentTime;" +
+
+            // If stuck for more than 2 seconds, force play
+            "  if (isStuck && (Date.now() - _stallCheckStart) > 2000) {" +
+            "    v.play().catch(function(){});" +
+            // If still stuck after play attempt, try clicking the player
+            "    setTimeout(function() {" +
+            "      var v2 = document.querySelector('video');" +
+            "      if (v2 && v2.paused && !v2.ended && !window._ytlUserPaused) {" +
+            "        var playerEl = document.querySelector('.html5-video-player, .player-container, #player');" +
+            "        if (playerEl) playerEl.click();" +
+            "        v2.play().catch(function(){});" +
+            "      }" +
+            "    }, 500);" +
+            "  }" +
+
+            // If video has been black/stuck for 5+ seconds, try reloading video source
+            "  if (isStuck && (Date.now() - _stallCheckStart) > 5000) {" +
+            "    if (v.readyState < 2) {" +
+            // Video hasn't loaded enough data - try to trigger reload
+            "      var src = v.currentSrc || v.src;" +
+            "      if (src) {" +
+            "        v.load();" +
+            "        v.play().catch(function(){});" +
+            "      }" +
+            "    }" +
+            "  }" +
+
+            // If stuck for 8+ seconds, most aggressive - seek slightly and play
+            "  if (isStuck && (Date.now() - _stallCheckStart) > 8000) {" +
+            "    v.currentTime = 0.1;" +
+            "    v.play().catch(function(){});" +
+            "    _stallCheckStart = Date.now();" + // Reset to avoid infinite loop
+            "  }" +
+            "}" +
+            "setInterval(checkStall, 500);" +
+
+            // ============ VIDEO CHANGE WATCHER ============
+            // Watch for new video loads and reset stall timer
+            "function attachVideoListeners() {" +
+            "  var v = document.querySelector('video');" +
+            "  if (!v || v._ytlListenersAttached) return;" +
+            "  v._ytlListenersAttached = true;" +
+            "  v.addEventListener('loadstart', function() {" +
+            "    _stallCheckStart = Date.now();" +
+            "    _lastVideoTime = -1;" +
+            "  });" +
+            "  v.addEventListener('playing', function() {" +
+            "    _stallCheckStart = Date.now();" +
+            "    if (v.playbackRate === 16 && !isAdPlaying()) v.playbackRate = 1;" +
+            "  });" +
+            "  v.addEventListener('canplay', function() {" +
+            "    if (!window._ytlUserPaused && v.paused && !isAdPlaying()) {" +
+            "      v.play().catch(function(){});" +
+            "    }" +
+            "  });" +
+            "}" +
+            "attachVideoListeners();" +
+
+            // ============ SPA NAVIGATION WATCHER ============
+            "var _lastUrl = location.href;" +
+            "setInterval(function() {" +
+            "  if (location.href !== _lastUrl) {" +
+            "    _lastUrl = location.href;" +
+            "    _stallCheckStart = Date.now();" +
+            "    _lastVideoTime = -1;" +
+            "    setTimeout(attachVideoListeners, 500);" +
+            "    setTimeout(function() {" +
+            "      var v = document.querySelector('video');" +
+            "      if (v && v.paused && !window._ytlUserPaused) {" +
+            "        v.play().catch(function(){});" +
+            "      }" +
+            "    }, 1000);" +
+            "    setTimeout(function() {" +
+            "      var v = document.querySelector('video');" +
+            "      if (v && v.paused && !window._ytlUserPaused) {" +
+            "        v.play().catch(function(){});" +
+            "      }" +
+            "    }, 2000);" +
+            "    setTimeout(function() {" +
+            "      var v = document.querySelector('video');" +
+            "      if (v && v.paused && !window._ytlUserPaused) {" +
+            "        v.play().catch(function(){});" +
+            "        v.load();" +
+            "        v.play().catch(function(){});" +
+            "      }" +
+            "    }, 4000);" +
+            "  }" +
+            "}, 300);" +
+
+            // ============ MUTATION OBSERVER ============
+            "var obs = new MutationObserver(function(mutations) {" +
+            "  for (var i = 0; i < mutations.length; i++) {" +
+            "    var m = mutations[i];" +
+            "    if (m.type === 'attributes' && m.attributeName === 'class') {" +
+            "      if (m.target.classList && m.target.classList.contains('ad-showing')) {" +
+            "        skipAd();" +
+            "      }" +
+            "    }" +
+            "    if (m.type === 'childList') {" +
+            "      m.addedNodes.forEach(function(node) {" +
+            "        if (node.nodeType === 1 && node.tagName === 'VIDEO') {" +
+            "          attachVideoListeners();" +
+            "        }" +
+            "      });" +
+            "    }" +
+            "  }" +
+            "});" +
+            "obs.observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['class']});" +
+
+            // ============ FEED AD REMOVAL ============
+            "function removeExistingAds() {" +
+            "  var selectors = ['ytm-promoted-sparkles-web-renderer','ytd-ad-slot-renderer','ytd-in-feed-ad-layout-renderer','ytm-companion-ad-renderer','ytd-carousel-ad-renderer','ytd-promoted-video-renderer','ytd-display-ad-renderer','.ad-container','.ytp-ad-module','.video-ads','#masthead-ad','#player-ads'];" +
+            "  selectors.forEach(function(s) {" +
+            "    document.querySelectorAll(s).forEach(function(el) { el.remove(); });" +
+            "  });" +
+            "}" +
+            "removeExistingAds();" +
+            "setInterval(removeExistingAds, 2000);" +
+
+            // ============ FETCH/XHR INTERCEPT ============
+            "var origFetch = window.fetch;" +
+            "window.fetch = function() {" +
+            "  var u = (arguments[0] && arguments[0].url) ? arguments[0].url : String(arguments[0]);" +
+            "  if (u.indexOf('doubleclick') > -1 || u.indexOf('googlesyndication') > -1 || u.indexOf('imasdk') > -1) {" +
+            "    return Promise.resolve(new Response('', {status: 200}));" +
+            "  }" +
+            "  return origFetch.apply(this, arguments).then(function(resp) {" +
+            "    if (u.indexOf('youtubei/v1/player') > -1) {" +
+            "      return resp.clone().text().then(function(t) {" +
+            "        try {" +
+            "          var j = JSON.parse(t);" +
+            "          delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
+            "          delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
+            "          if (j.playerResponse) {" +
+            "            delete j.playerResponse.adPlacements;" +
+            "            delete j.playerResponse.playerAds;" +
+            "            delete j.playerResponse.adSlots;" +
+            "            delete j.playerResponse.adBreakParams;" +
+            "          }" +
+            "          return new Response(JSON.stringify(j), {status: resp.status, headers: resp.headers});" +
+            "        } catch(e) { return resp; }" +
+            "      });" +
+            "    }" +
+            "    return resp;" +
+            "  });" +
+            "};" +
+
+            "var origOpen = XMLHttpRequest.prototype.open;" +
+            "XMLHttpRequest.prototype.open = function(m, u) {" +
+            "  this._url = u || '';" +
+            "  if (u && (u.indexOf('doubleclick') > -1 || u.indexOf('googlesyndication') > -1)) {" +
+            "    this._blocked = true;" +
+            "  }" +
+            "  return origOpen.apply(this, arguments);" +
+            "};" +
+            "var origSend = XMLHttpRequest.prototype.send;" +
+            "XMLHttpRequest.prototype.send = function() {" +
+            "  if (this._blocked) return;" +
+            "  var self = this;" +
+            "  if (self._url && self._url.indexOf('youtubei/v1/player') > -1) {" +
+            "    var origOnReady = self.onreadystatechange;" +
+            "    self.onreadystatechange = function() {" +
+            "      if (self.readyState === 4) {" +
+            "        try {" +
+            "          var j = JSON.parse(self.responseText);" +
+            "          delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
+            "          delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
+            "          Object.defineProperty(self, 'responseText', {value: JSON.stringify(j), writable: false});" +
+            "          Object.defineProperty(self, 'response', {value: JSON.stringify(j), writable: false});" +
+            "        } catch(e) {}" +
+            "      }" +
+            "      if (origOnReady) origOnReady.apply(self, arguments);" +
+            "    };" +
+            "  }" +
+            "  return origSend.apply(this, arguments);" +
+            "};" +
+
+            // ============ AUTOPLAY NEXT ============
             "function setupAutoplay() {" +
             "  var v = document.querySelector('video');" +
-            "  if (!v) { setTimeout(setupAutoplay, 1000); return; }" +
-            "  if (v._ytlAutoplaySetup) return;" +
-            "  v._ytlAutoplaySetup = true;" +
+            "  if (!v || v._ytlAutoplay) return;" +
+            "  v._ytlAutoplay = true;" +
             "  v.setAttribute('playsinline', '');" +
             "  v.setAttribute('webkit-playsinline', '');" +
             "  v.addEventListener('ended', function() {" +
@@ -359,20 +393,8 @@ public class YTProWebViewClient extends WebViewClient {
             "  });" +
             "}" +
             "setupAutoplay();" +
+            "setInterval(setupAutoplay, 2000);" +
 
-            // Re-setup on navigation (SPA) - watch for URL changes
-            "var lastUrl = location.href;" +
-            "setInterval(function() {" +
-            "  if (location.href !== lastUrl) {" +
-            "    lastUrl = location.href;" +
-            "    window._ytlExpectedLongVideo = false;" +
-            "    setTimeout(setupAutoplay, 1000);" +
-            "  }" +
-            "}, 500);" +
-
-            // Also watch title changes
-            "var navObserver = new MutationObserver(function() { setTimeout(setupAutoplay, 1500); });" +
-            "navObserver.observe(document.querySelector('title') || document.head, {childList: true, subtree: true});" +
             "})();";
     }
 }
