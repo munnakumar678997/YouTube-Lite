@@ -1,37 +1,26 @@
 package com.myapp.youtubelite.webview;
-
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.content.Context;
 import android.util.Log;
-
 import java.io.ByteArrayInputStream;
-
 public class YTProWebViewClient extends WebViewClient {
-
     private static final String TAG = "YTProWebViewClient";
     private Context context;
-
     public YTProWebViewClient(Context context) {
         this.context = context;
     }
-
     @Override
     public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
         String url = request.getUrl().toString().toLowerCase();
-
         if (isAdUrl(url)) {
-            Log.d(TAG, "Blocked ad URL: " + url);
             return new WebResourceResponse("text/plain", "utf-8", new ByteArrayInputStream("".getBytes()));
         }
-
         return super.shouldInterceptRequest(view, request);
     }
-
     private boolean isAdUrl(String url) {
-        // NEVER block video/player/content URLs
         if (url.contains("googlevideo.com") ||
             url.contains("videoplayback") ||
             url.contains("youtubei/v1/player") ||
@@ -53,7 +42,6 @@ public class YTProWebViewClient extends WebViewClient {
             url.contains("gstatic.com")) {
             return false;
         }
-
         return url.contains("doubleclick.net") ||
                 url.contains("googlesyndication.com") ||
                 url.contains("googleadservices.com") ||
@@ -74,32 +62,32 @@ public class YTProWebViewClient extends WebViewClient {
                 url.contains("survey.g.doubleclick.net") ||
                 url.contains("google.com/adsense");
     }
-
     @Override
     public void onPageFinished(WebView view, String url) {
         super.onPageFinished(view, url);
         view.evaluateJavascript(getMasterScript(), null);
     }
-
     @Override
     public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
         String url = request.getUrl().toString();
         if (url.contains("youtube.com") || url.contains("youtu.be")) {
-            view.postDelayed(new Runnable() {
-                @Override
-                public void run() {
-                    view.evaluateJavascript(getMasterScript(), null);
-                }
-            }, 300);
             return false;
         }
         return false;
     }
-
+    @Override
+    public void doUpdateVisitedHistory(WebView view, String url, boolean isReload) {
+        super.doUpdateVisitedHistory(view, url, isReload);
+        // This fires on EVERY URL change including SPA pushState/replaceState
+        // This is the KEY hook for detecting SPA navigation on m.youtube.com
+        if (url.contains("youtube.com/watch")) {
+            view.evaluateJavascript("(function(){window._ytlNavDetected=Date.now();window._ytlNavHandled=false;})();", null);
+        }
+    }
     private String getMasterScript() {
-        return "(" + "function() {" +
-            "if (window._ytlMasterV3) return;" +
-            "window._ytlMasterV3 = true;" +
+        return "(function() {" +
+            "if (window._ytlMasterV5) return;" +
+            "window._ytlMasterV5 = true;" +
 
             // ============ CSS AD HIDE ============
             "var css = document.createElement('style');" +
@@ -151,7 +139,6 @@ public class YTProWebViewClient extends WebViewClient {
             "  if (document.querySelector('[class*=\"ad-interrupting\"], [class*=\"ad-created\"], .player-ads-container')) return true;" +
             "  return false;" +
             "}" +
-
             "function skipAd() {" +
             "  var v = document.querySelector('video');" +
             "  if (!v) return;" +
@@ -165,148 +152,109 @@ public class YTProWebViewClient extends WebViewClient {
             "  if (v.playbackRate === 16) v.playbackRate = 1;" +
             "  return false;" +
             "}" +
-            "setInterval(skipAd, 50);" +
+            "setInterval(skipAd, 100);" +
 
-            // ============ STALL DETECTION & FORCE PLAY ============
-            // This is the KEY fix for the black screen on 2nd video
-            // When YouTube navigates to a new video (SPA), the video element
-            // often gets stuck in a loading/stalled state. We detect this and
-            // force the video to play by clicking the player or calling play()
-            "var _stallCheckStart = 0;" +
-            "var _lastVideoTime = -1;" +
-            "var _lastVideoSrc = '';" +
+            // ============ CORE FIX: VIDEO RELOAD ON SPA NAVIGATION ============
+            // The KEY insight from research:
+            // - On first load, page loads fresh so no ad-waiting state
+            // - On SPA navigation (2nd video click), YouTube's player enters ad-waiting state
+            // - play() doesn't work because player state machine is in "ad" state
+            // - loadVideoById() RESETS the player state machine, bypassing ad state
+            // - If loadVideoById not available (mobile), force a page reload (which also bypasses ads)
+            "var _ytlLastUrl = location.href;" +
+            "var _ytlNavTime = 0;" +
+            "var _ytlIsPlaying = true;" + // Assume first video is playing
+            "var _ytlReloadDone = false;" +
 
-            "function checkStall() {" +
+            "function getVideoId() {" +
+            "  try {" +
+            "    var params = new URLSearchParams(window.location.search);" +
+            "    return params.get('v');" +
+            "  } catch(e) { return null; }" +
+            "}" +
+
+            "function isVideoPlaying() {" +
             "  var v = document.querySelector('video');" +
-            "  if (!v) return;" +
-            "  if (window._ytlUserPaused) return;" +
-            "  if (isAdPlaying()) return;" +  // Don't interfere with ad skip
+            "  if (!v) return false;" +
+            "  return !v.paused && v.currentTime > 0.3 && v.readyState >= 3;" +
+            "}" +
 
-            // Detect if video source changed (new video navigation)
-            "  var currentSrc = v.currentSrc || v.src || '';" +
-            "  if (currentSrc !== _lastVideoSrc) {" +
-            "    _lastVideoSrc = currentSrc;" +
-            "    _stallCheckStart = Date.now();" +
-            "    _lastVideoTime = -1;" +
+            "function forceLoadVideo() {" +
+            "  if (_ytlReloadDone || _ytlIsPlaying) return;" +
+            "  var videoId = getVideoId();" +
+            "  if (!videoId) return;" +
+            "  var elapsed = Date.now() - _ytlNavTime;" +
+            "  if (elapsed < 2500) return;" + // Wait 2.5s before intervening
+
+            // Check again if video started playing in the meantime
+            "  if (isVideoPlaying()) { _ytlIsPlaying = true; return; }" +
+
+            // APPROACH 1: Use movie_player.loadVideoById() (desktop YouTube internal API)
+            "  var mp = document.getElementById('movie_player');" +
+            "  if (!mp) mp = document.querySelector('.html5-video-player');" +
+            "  if (mp && typeof mp.loadVideoById === 'function') {" +
+            "    try {" +
+            "      mp.loadVideoById(videoId, 0);" +
+            "      _ytlReloadDone = true;" +
+            "      return;" +
+            "    } catch(e) {}" +
             "  }" +
 
-            // Check if video is stuck (paused or not progressing)
-            "  var isStuck = false;" +
-            "  if (v.paused && !v.ended && v.readyState >= 2) {" +
-            "    isStuck = true;" +
-            "  }" +
-            "  if (!v.paused && v.currentTime === _lastVideoTime && v.readyState < 3) {" +
-            "    isStuck = true;" +
-            "  }" +
-            "  _lastVideoTime = v.currentTime;" +
-
-            // If stuck for more than 2 seconds, force play
-            "  if (isStuck && (Date.now() - _stallCheckStart) > 2000) {" +
-            "    v.play().catch(function(){});" +
-            // If still stuck after play attempt, try clicking the player
-            "    setTimeout(function() {" +
-            "      var v2 = document.querySelector('video');" +
-            "      if (v2 && v2.paused && !v2.ended && !window._ytlUserPaused) {" +
-            "        var playerEl = document.querySelector('.html5-video-player, .player-container, #player');" +
-            "        if (playerEl) playerEl.click();" +
-            "        v2.play().catch(function(){});" +
-            "      }" +
-            "    }, 500);" +
+            // APPROACH 2: Use movie_player.loadVideoByPlayerVars() if available
+            "  if (mp && typeof mp.loadVideoByPlayerVars === 'function') {" +
+            "    try {" +
+            "      mp.loadVideoByPlayerVars({video_id: videoId});" +
+            "      _ytlReloadDone = true;" +
+            "      return;" +
+            "    } catch(e) {}" +
             "  }" +
 
-            // If video has been black/stuck for 5+ seconds, try reloading video source
-            "  if (isStuck && (Date.now() - _stallCheckStart) > 5000) {" +
-            "    if (v.readyState < 2) {" +
-            // Video hasn't loaded enough data - try to trigger reload
-            "      var src = v.currentSrc || v.src;" +
-            "      if (src) {" +
-            "        v.load();" +
-            "        v.play().catch(function(){});" +
-            "      }" +
-            "    }" +
-            "  }" +
-
-            // If stuck for 8+ seconds, most aggressive - seek slightly and play
-            "  if (isStuck && (Date.now() - _stallCheckStart) > 8000) {" +
-            "    v.currentTime = 0.1;" +
-            "    v.play().catch(function(){});" +
-            "    _stallCheckStart = Date.now();" + // Reset to avoid infinite loop
+            // APPROACH 3: Force page reload (simulates browser refresh which bypasses ads)
+            // This is the NUCLEAR but RELIABLE option for m.youtube.com
+            "  if (elapsed > 3000) {" +
+            "    _ytlReloadDone = true;" +
+            "    window.location.reload();" +
             "  }" +
             "}" +
-            "setInterval(checkStall, 500);" +
 
-            // ============ VIDEO CHANGE WATCHER ============
-            // Watch for new video loads and reset stall timer
-            "function attachVideoListeners() {" +
-            "  var v = document.querySelector('video');" +
-            "  if (!v || v._ytlListenersAttached) return;" +
-            "  v._ytlListenersAttached = true;" +
-            "  v.addEventListener('loadstart', function() {" +
-            "    _stallCheckStart = Date.now();" +
-            "    _lastVideoTime = -1;" +
-            "  });" +
-            "  v.addEventListener('playing', function() {" +
-            "    _stallCheckStart = Date.now();" +
-            "    if (v.playbackRate === 16 && !isAdPlaying()) v.playbackRate = 1;" +
-            "  });" +
-            "  v.addEventListener('canplay', function() {" +
-            "    if (!window._ytlUserPaused && v.paused && !isAdPlaying()) {" +
-            "      v.play().catch(function(){});" +
-            "    }" +
-            "  });" +
-            "}" +
-            "attachVideoListeners();" +
-
-            // ============ SPA NAVIGATION WATCHER ============
-            "var _lastUrl = location.href;" +
+            // Monitor URL changes for SPA navigation
             "setInterval(function() {" +
-            "  if (location.href !== _lastUrl) {" +
-            "    _lastUrl = location.href;" +
-            "    _stallCheckStart = Date.now();" +
-            "    _lastVideoTime = -1;" +
-            "    setTimeout(attachVideoListeners, 500);" +
-            "    setTimeout(function() {" +
-            "      var v = document.querySelector('video');" +
-            "      if (v && v.paused && !window._ytlUserPaused) {" +
-            "        v.play().catch(function(){});" +
-            "      }" +
-            "    }, 1000);" +
-            "    setTimeout(function() {" +
-            "      var v = document.querySelector('video');" +
-            "      if (v && v.paused && !window._ytlUserPaused) {" +
-            "        v.play().catch(function(){});" +
-            "      }" +
-            "    }, 2000);" +
-            "    setTimeout(function() {" +
-            "      var v = document.querySelector('video');" +
-            "      if (v && v.paused && !window._ytlUserPaused) {" +
-            "        v.play().catch(function(){});" +
-            "        v.load();" +
-            "        v.play().catch(function(){});" +
-            "      }" +
-            "    }, 4000);" +
+            "  var currentUrl = location.href;" +
+            "  if (currentUrl !== _ytlLastUrl) {" +
+            "    _ytlLastUrl = currentUrl;" +
+            "    _ytlNavTime = Date.now();" +
+            "    _ytlIsPlaying = false;" +
+            "    _ytlReloadDone = false;" +
             "  }" +
-            "}, 300);" +
+            // Check if video is playing
+            "  if (!_ytlIsPlaying && isVideoPlaying()) {" +
+            "    _ytlIsPlaying = true;" +
+            "  }" +
+            // If not playing and nav happened, try to force
+            "  if (!_ytlIsPlaying && !_ytlReloadDone && _ytlNavTime > 0) {" +
+            "    forceLoadVideo();" +
+            "  }" +
+            "}, 500);" +
 
-            // ============ MUTATION OBSERVER ============
-            "var obs = new MutationObserver(function(mutations) {" +
-            "  for (var i = 0; i < mutations.length; i++) {" +
-            "    var m = mutations[i];" +
-            "    if (m.type === 'attributes' && m.attributeName === 'class') {" +
-            "      if (m.target.classList && m.target.classList.contains('ad-showing')) {" +
-            "        skipAd();" +
+            // Also handle doUpdateVisitedHistory signal
+            "setInterval(function() {" +
+            "  if (window._ytlNavDetected && !window._ytlNavHandled) {" +
+            "    var elapsed = Date.now() - window._ytlNavDetected;" +
+            "    if (elapsed > 2500 && !isVideoPlaying() && !_ytlReloadDone) {" +
+            "      window._ytlNavHandled = true;" +
+            "      _ytlReloadDone = true;" +
+            "      var videoId = getVideoId();" +
+            "      var mp = document.getElementById('movie_player');" +
+            "      if (!mp) mp = document.querySelector('.html5-video-player');" +
+            "      if (mp && typeof mp.loadVideoById === 'function') {" +
+            "        try { mp.loadVideoById(videoId, 0); return; } catch(e) {}" +
             "      }" +
-            "    }" +
-            "    if (m.type === 'childList') {" +
-            "      m.addedNodes.forEach(function(node) {" +
-            "        if (node.nodeType === 1 && node.tagName === 'VIDEO') {" +
-            "          attachVideoListeners();" +
-            "        }" +
-            "      });" +
+            "      window.location.reload();" +
+            "    } else if (isVideoPlaying()) {" +
+            "      window._ytlNavHandled = true;" +
             "    }" +
             "  }" +
-            "});" +
-            "obs.observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['class']});" +
+            "}, 500);" +
 
             // ============ FEED AD REMOVAL ============
             "function removeExistingAds() {" +
@@ -332,6 +280,8 @@ public class YTProWebViewClient extends WebViewClient {
             "          var j = JSON.parse(t);" +
             "          delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
             "          delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
+            "          if (j.playerConfig && j.playerConfig.adRequestConfig) delete j.playerConfig.adRequestConfig;" +
+            "          if (j.adParams) delete j.adParams;" +
             "          if (j.playerResponse) {" +
             "            delete j.playerResponse.adPlacements;" +
             "            delete j.playerResponse.playerAds;" +
@@ -345,7 +295,6 @@ public class YTProWebViewClient extends WebViewClient {
             "    return resp;" +
             "  });" +
             "};" +
-
             "var origOpen = XMLHttpRequest.prototype.open;" +
             "XMLHttpRequest.prototype.open = function(m, u) {" +
             "  this._url = u || '';" +
@@ -366,6 +315,8 @@ public class YTProWebViewClient extends WebViewClient {
             "          var j = JSON.parse(self.responseText);" +
             "          delete j.adSlots; delete j.playerAds; delete j.adPlacements;" +
             "          delete j.adBreakHeartbeatParams; delete j.adBreakParams;" +
+            "          if (j.playerConfig && j.playerConfig.adRequestConfig) delete j.playerConfig.adRequestConfig;" +
+            "          if (j.adParams) delete j.adParams;" +
             "          Object.defineProperty(self, 'responseText', {value: JSON.stringify(j), writable: false});" +
             "          Object.defineProperty(self, 'response', {value: JSON.stringify(j), writable: false});" +
             "        } catch(e) {}" +
@@ -375,6 +326,29 @@ public class YTProWebViewClient extends WebViewClient {
             "  }" +
             "  return origSend.apply(this, arguments);" +
             "};" +
+
+            // ============ STRIP ytInitialPlayerResponse ============
+            "try {" +
+            "  if (window.ytInitialPlayerResponse) {" +
+            "    delete window.ytInitialPlayerResponse.adSlots;" +
+            "    delete window.ytInitialPlayerResponse.playerAds;" +
+            "    delete window.ytInitialPlayerResponse.adPlacements;" +
+            "    delete window.ytInitialPlayerResponse.adBreakHeartbeatParams;" +
+            "  }" +
+            "} catch(e) {}" +
+
+            // ============ MUTATION OBSERVER ============
+            "var obs = new MutationObserver(function(mutations) {" +
+            "  for (var i = 0; i < mutations.length; i++) {" +
+            "    var m = mutations[i];" +
+            "    if (m.type === 'attributes' && m.attributeName === 'class') {" +
+            "      if (m.target.classList && m.target.classList.contains('ad-showing')) {" +
+            "        skipAd();" +
+            "      }" +
+            "    }" +
+            "  }" +
+            "});" +
+            "obs.observe(document.documentElement, {childList: true, subtree: true, attributes: true, attributeFilter: ['class']});" +
 
             // ============ AUTOPLAY NEXT ============
             "function setupAutoplay() {" +
@@ -394,7 +368,6 @@ public class YTProWebViewClient extends WebViewClient {
             "}" +
             "setupAutoplay();" +
             "setInterval(setupAutoplay, 2000);" +
-
             "})();";
     }
 }
