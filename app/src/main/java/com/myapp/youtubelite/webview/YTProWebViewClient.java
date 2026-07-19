@@ -184,7 +184,7 @@ public class YTProWebViewClient extends WebViewClient {
             "  var videoId = getVideoId();" +
             "  if (!videoId) return;" +
             "  var elapsed = Date.now() - _ytlNavTime;" +
-            "  if (elapsed < 2500) return;" + // Wait 2.5s before intervening
+            "  if (elapsed < 1500) return;" + // Wait 1.5s before intervening
 
             // Check again if video started playing in the meantime
             "  if (isVideoPlaying()) { _ytlIsPlaying = true; return; }" +
@@ -209,9 +209,16 @@ public class YTProWebViewClient extends WebViewClient {
             "    } catch(e) {}" +
             "  }" +
 
-            // APPROACH 3: Force page reload (simulates browser refresh which bypasses ads)
-            // This is the NUCLEAR but RELIABLE option for m.youtube.com
-            "  if (elapsed > 3000) {" +
+            // APPROACH 3: Try to navigate to the video URL directly (forces fresh load without full reload)
+            "  if (elapsed > 1800) {" +
+            "    _ytlReloadDone = true;" +
+            // Navigate to the same URL which forces YouTube to do a fresh page load
+            "    window.location.href = 'https://m.youtube.com/watch?v=' + videoId;" +
+            "    return;" +
+            "  }" +
+
+            // APPROACH 4: Force page reload as last resort
+            "  if (elapsed > 2500) {" +
             "    _ytlReloadDone = true;" +
             "    window.location.reload();" +
             "  }" +
@@ -240,7 +247,7 @@ public class YTProWebViewClient extends WebViewClient {
             "setInterval(function() {" +
             "  if (window._ytlNavDetected && !window._ytlNavHandled) {" +
             "    var elapsed = Date.now() - window._ytlNavDetected;" +
-            "    if (elapsed > 2500 && !isVideoPlaying() && !_ytlReloadDone) {" +
+            "    if (elapsed > 1500 && !isVideoPlaying() && !_ytlReloadDone) {" +
             "      window._ytlNavHandled = true;" +
             "      _ytlReloadDone = true;" +
             "      var videoId = getVideoId();" +
